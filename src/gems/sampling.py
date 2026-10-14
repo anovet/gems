@@ -13,7 +13,7 @@ def sample_training_pixels(
     """
     positives = eligible & known_faults
     negative_idx = np.flatnonzero(eligible & ~known_faults)
-    n_neg = min(len(negative_idx), int(round(negative_ratio * positives.sum())))
+    n_neg = min(len(negative_idx), round(negative_ratio * positives.sum()))
     chosen = rng.choice(negative_idx, size=n_neg, replace=False)
     mask = positives.copy()
     mask.flat[chosen] = True

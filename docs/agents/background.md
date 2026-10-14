@@ -1,3 +1,5 @@
+> Copied verbatim from the challenge pages. Some file names and details below don't match the data we were given; see the corrections in [`docs/data.md`](../data.md).
+
 # Intro
 
 Welcome to the Geologic Enhanced Mapping System (GEMS) Prize Challenge!

@@ -13,6 +13,8 @@ The `data/` folder isn't tracked by Git because the files are too large for GitH
 - `example_submission.tif`: sample submission, showing the format
 - `tnm_items.json`: The National Map item listing, for the 1 m DEM downloads (not used until V4)
 
+See [`docs/data.md`](docs/data.md) for the grid, the nodata encodings and the gotchas in these files.
+
 ### Python environment
 
 Requires [uv](https://docs.astral.sh/uv/). From the repo root:
@@ -23,7 +25,7 @@ uv sync
 
 This installs Python 3.14, the dependencies and the `gems` command. Check it with `uv run gems --help`.
 
-Tests use synthetic data only and never read `data/`: `uv run pytest`.
+Tests use synthetic data only and never read `data/`: `uv run pytest`. Lint with `uv run ruff check .`. CI runs both on every push to `main` and on every pull request.
 
 ## Running an experiment
 

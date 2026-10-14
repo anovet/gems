@@ -20,7 +20,7 @@ class PixelGradientBoosting:
         self.params = params
         self._clf: HistGradientBoostingClassifier | None = None
 
-    def fit(self, features: np.ndarray, known_faults: np.ndarray, train: np.ndarray) -> "PixelGradientBoosting":
+    def fit(self, features: np.ndarray, known_faults: np.ndarray, train: np.ndarray) -> PixelGradientBoosting:
         """Train on the pixels in `train`, with known faults as the positive class."""
         self._clf = HistGradientBoostingClassifier(**self.params)
         self._clf.fit(pixel_rows(features, train), known_faults[train])

@@ -6,8 +6,8 @@ from datetime import datetime
 import numpy as np
 import pytest
 import rasterio
-
 from conftest import COLS, ORIGIN_X, ORIGIN_Y, PIXEL, ROWS
+
 from gems.dti import score_dti
 from gems.runner import run_experiment
 from gems.submission import validate_submission

@@ -15,4 +15,6 @@ Default vocabulary: `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-
 Single-context: one `GLOSSARY.md` and `docs/adr/` at the repo root. See `docs/agents/domain.md`.
 General background on the project, copied from an external source: `docs/agents/background.md`
 
+Before reading or writing rasters, see `docs/data.md` for the grid, nodata encodings and data gotchas.
+
 When discussing improvements to the model or pipeline, read the "Known limitations / improvement ideas" section of `docs/roadmap.md` and raise those limitations as candidates.

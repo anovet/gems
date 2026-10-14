@@ -6,9 +6,9 @@ runner's outputs, so it is checked here on `gems.folds` directly.
 """
 
 import numpy as np
+from conftest import study_area_mask
 from scipy import ndimage
 
-from conftest import study_area_mask
 from gems.folds import assign_spatial_folds, training_region
 
 

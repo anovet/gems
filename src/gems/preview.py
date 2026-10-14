@@ -169,7 +169,7 @@ def _draw_faults(ax, known_faults, grid, window, pool, colour=FAULT_COLOUR, alph
         padded = np.zeros((-(-h // factor) * factor, -(-w // factor) * factor), dtype=bool)
         padded[:h, :w] = cut
         cut = padded.reshape(padded.shape[0] // factor, factor, -1, factor).any(axis=(1, 3))
-        x0, x1, y0, y1 = _extent(grid, window)
+        x0, _, _, y1 = _extent(grid, window)
         extent = (x0, x0 + cut.shape[1] * factor * grid.res[0], y1 - cut.shape[0] * factor * grid.res[1], y1)
     else:
         extent = _extent(grid, window)
