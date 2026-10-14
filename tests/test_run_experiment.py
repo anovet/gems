@@ -54,6 +54,25 @@ def test_run_folder_records_config_metadata_and_submission(synthetic):
     assert isinstance(meta["git_dirty"], bool)
     assert datetime.fromisoformat(meta["start_time"]) <= datetime.fromisoformat(meta["end_time"])
     assert meta["runtime_seconds"] >= 0
+    assert meta["status"] == "completed"
+
+
+def test_a_failed_run_still_records_its_config_and_the_error(synthetic):
+    with open(synthetic.config, "rb") as f:
+        config = tomllib.load(f)
+    config["data"]["bands"] = ["mag_anom", "no_such_band"]
+
+    with pytest.raises(ValueError, match="no_such_band"):
+        run_experiment(config)
+
+    (run_dir,) = synthetic.runs_dir.iterdir()
+    with open(run_dir / "config.toml", "rb") as f:
+        assert tomllib.load(f)["data"]["bands"] == ["mag_anom", "no_such_band"]
+    meta = json.loads((run_dir / "metadata.json").read_text(encoding="utf-8"))
+    assert meta["status"] == "failed"
+    assert "no_such_band" in meta["error"]
+    assert meta["runtime_seconds"] >= 0
+    assert not (synthetic.runs_dir / "results.csv").exists()
 
 
 def test_repeated_runs_get_separate_folders(synthetic):

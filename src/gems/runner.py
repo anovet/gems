@@ -84,13 +84,54 @@ def load_config(config: str | Path | dict) -> dict[str, Any]:
 
 
 def run_experiment(config: str | Path | dict) -> RunResult:
-    """Run one experiment end to end: load data, predict, write and validate a submission."""
+    """Run one experiment end to end: load data, predict, write and validate a submission.
+
+    The run folder gets the resolved config.toml first and metadata.json last, also when the
+    run fails (status "failed" and the error); the failure is then re-raised. Only completed
+    runs get a row in the results CSV.
+    """
     cfg = load_config(config)
     started = datetime.now().astimezone()
     t0 = time.perf_counter()
     run_dir = _new_run_dir(Path(cfg["output"]["runs_dir"]), cfg["run"]["name"], started)
     _log(f"Run folder: {run_dir}")
+    _write_config(run_dir, cfg)
+    commit, dirty = _git_state()
+    metadata: dict[str, Any] = {
+        "run_name": cfg["run"]["name"],
+        "iteration": cfg["run"]["iteration"],
+        "status": "running",
+        "git_commit": commit,
+        "git_dirty": dirty,
+        "start_time": started.isoformat(),
+    }
+    try:
+        result = _run(cfg, run_dir, metadata)
+    except BaseException as e:
+        metadata["status"] = "failed"
+        metadata["error"] = f"{type(e).__name__}: {e}"
+        _write_metadata(run_dir, metadata, t0)
+        raise
+    metadata["status"] = "completed"
+    _write_metadata(run_dir, metadata, t0)
+    append_result(
+        Path(cfg["output"]["runs_dir"]) / RESULTS_CSV,
+        {
+            "timestamp": metadata["start_time"],
+            "run_name": metadata["run_name"],
+            "iteration": metadata["iteration"],
+            "run_dir": run_dir.name,
+            "git_commit": commit,
+            "git_dirty": dirty,
+            **result.scores,
+        },
+    )
+    _log(f"Done in {metadata['runtime_seconds']} s: {result.submission_path}")
+    return result
 
+
+def _run(cfg: dict[str, Any], run_dir: Path, metadata: dict[str, Any]) -> RunResult:
+    """The experiment itself; adds scores and post-processing parameters to `metadata`."""
     features_path, labels_path = Path(cfg["data"]["features"]), Path(cfg["data"]["labels"])
     _log("Loading feature bands and known-fault labels")
     grid = read_grid(features_path)
@@ -98,7 +139,9 @@ def run_experiment(config: str | Path | dict) -> RunResult:
     faults, study_area = read_labels(labels_path)
     if study_area.shape != grid.shape:
         raise ValueError(f"Label grid {study_area.shape} does not match feature grid {grid.shape}")
-    cfg["data"]["bands"] = names
+    if cfg["data"]["bands"] != names:
+        cfg["data"]["bands"] = names
+        _write_config(run_dir, cfg)  # record the bands actually used
 
     features, _ = compute_features(bands, names)
     del bands
@@ -110,6 +153,7 @@ def run_experiment(config: str | Path | dict) -> RunResult:
         "mean_local_score_raw": float(np.mean(fold_scores)),
         "fold_local_scores_raw": fold_scores,
     }
+    metadata["scores"] = scores
     _log(f"Mean local score (raw): {_score_summary(fold_scores)}")
 
     _log("Tuning post-processing on the out-of-fold predictions")
@@ -117,6 +161,8 @@ def run_experiment(config: str | Path | dict) -> RunResult:
     post_scores = local_scores(post_processing(out_of_fold), faults, folds)
     scores["mean_local_score_postprocessed"] = float(np.mean(post_scores))
     scores["fold_local_scores_postprocessed"] = post_scores
+    metadata["postprocess"] = post_processing.as_dict()
+    metadata["postprocess_note"] = TUNING_NOTE
     _log(f"Tuned post-processing: {post_processing.as_dict()}")
     _log(f"Mean local score (post-processed): {_score_summary(post_scores)}")
 
@@ -133,37 +179,20 @@ def run_experiment(config: str | Path | dict) -> RunResult:
 
     _log("Saving preview map")
     save_preview(run_dir / "preview.png", probabilities, faults, study_area, grid, title=run_dir.name)
-
-    ended = datetime.now().astimezone()
-    commit, dirty = _git_state()
-    (run_dir / "config.toml").write_text(_to_toml(cfg), encoding="utf-8")
-    metadata = {
-        "run_name": cfg["run"]["name"],
-        "iteration": cfg["run"]["iteration"],
-        "git_commit": commit,
-        "git_dirty": dirty,
-        "start_time": started.isoformat(),
-        "end_time": ended.isoformat(),
-        "runtime_seconds": round(time.perf_counter() - t0, 3),
-        "scores": scores,
-        "postprocess": post_processing.as_dict(),
-        "postprocess_note": TUNING_NOTE,
-    }
-    (run_dir / "metadata.json").write_text(json.dumps(metadata, indent=2), encoding="utf-8")
-    append_result(
-        Path(cfg["output"]["runs_dir"]) / RESULTS_CSV,
-        {
-            "timestamp": metadata["start_time"],
-            "run_name": metadata["run_name"],
-            "iteration": metadata["iteration"],
-            "run_dir": run_dir.name,
-            "git_commit": commit,
-            "git_dirty": dirty,
-            **scores,
-        },
-    )
-    _log(f"Done in {metadata['runtime_seconds']} s: {submission_path}")
     return RunResult(run_dir, submission_path, scores, out_of_fold=out_of_fold, folds=folds)
+
+
+def _write_config(run_dir: Path, cfg: dict[str, Any]) -> None:
+    (run_dir / "config.toml").write_text(_to_toml(cfg), encoding="utf-8")
+
+
+def _write_metadata(run_dir: Path, metadata: dict[str, Any], t0: float) -> None:
+    """Write metadata.json with the end time and runtime filled in."""
+    metadata.update(
+        end_time=datetime.now().astimezone().isoformat(),
+        runtime_seconds=round(time.perf_counter() - t0, 3),
+    )
+    (run_dir / "metadata.json").write_text(json.dumps(metadata, indent=2), encoding="utf-8")
 
 
 def _out_of_fold_predictions(
