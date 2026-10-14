@@ -5,7 +5,7 @@ import time
 import numpy as np
 import pytest
 
-from gems.dti import score_dti
+from gems.dti import RegionScorer, score_dti
 
 
 def grid(shape=(11, 11)):
@@ -152,6 +152,58 @@ def test_excluded_fault_trace_pixels_are_not_scored():
     assert score.tp_w == 0.0
     assert score.fn_w == 0.0
     assert score.fp_w == pytest.approx(0.4)
+
+
+def test_each_region_is_scored_on_its_own_fault_traces():
+    fault_trace = np.zeros((11, 11), dtype=bool)
+    fault_trace[5, 5] = True
+    regions = np.zeros((11, 11), dtype=np.int16)
+    regions[:, 6:] = 1  # the fault trace is in region 0, right at the border
+    probability = grid()
+    probability[5, 5] = 0.5  # on the fault trace
+    probability[5, 6] = 1.0  # 100 m away, but across the border in region 1
+
+    region_0, region_1 = RegionScorer(fault_trace, regions).score(probability)
+
+    assert region_0.tp_w == pytest.approx(0.5)  # no credit from the prediction in region 1
+    assert region_0.fp_w == pytest.approx(0.0)
+    assert region_1.tp_w == 0.0 and region_1.fn_w == 0.0
+    assert region_1.fp_w == pytest.approx(1.0)  # no fault trace in its own region
+    assert region_1.dti == 0.0
+
+
+def _random_scene(seed=0, shape=(40, 50)):
+    rng = np.random.default_rng(seed)
+    probability = rng.random(shape, dtype=np.float32)
+    probability[rng.random(shape) < 0.5] = 0.0
+    fault_trace = rng.random(shape) < 0.05
+    regions = rng.integers(-1, 3, size=shape).astype(np.int16)  # -1: not scored
+    regions[:20, :25] = 0  # contiguous blocks as well as scattered pixels
+    regions[20:, 25:] = 2
+    return probability, fault_trace, regions
+
+
+def test_scoring_regions_together_matches_scoring_each_region_alone():
+    probability, fault_trace, regions = _random_scene()
+
+    together = RegionScorer(fault_trace, regions).score(probability)
+
+    for k, score in enumerate(together):
+        alone = score_dti(probability, fault_trace, regions == k)
+        assert score.dti == pytest.approx(alone.dti, rel=1e-6)
+        assert score.tp_w == pytest.approx(alone.tp_w, rel=1e-6)
+        assert score.fp_w == pytest.approx(alone.fp_w, rel=1e-6)
+        assert score.fn_w == pytest.approx(alone.fn_w, rel=1e-6)
+
+
+def test_scoring_only_the_nonzero_pixels_gives_exactly_the_full_map_score():
+    probability, fault_trace, regions = _random_scene(seed=1)
+    scorer = RegionScorer(fault_trace, regions)
+    values = scorer.pixel_values(probability)
+    at = np.flatnonzero(values > 0.3)
+    thresholded = np.where(probability > 0.3, probability, 0.0)
+
+    assert scorer.score_pixels(values[at], at=at) == scorer.score(thresholded)
 
 
 def test_scores_a_full_size_grid_in_seconds():

@@ -14,7 +14,7 @@ import numpy as np
 from gems.features import compute_features
 from gems.folds import assign_spatial_folds, local_scores, training_region
 from gems.model import build_model
-from gems.postprocess import IDENTITY, TUNING_NOTE, tune_transform
+from gems.postprocess import TUNING_NOTE, tune_post_processing
 from gems.preview import save_preview
 from gems.raster import read_feature_bands, read_grid, read_labels
 from gems.results import append_result
@@ -113,19 +113,17 @@ def run_experiment(config: str | Path | dict) -> RunResult:
     _log(f"Mean local score (raw): {_score_summary(fold_scores)}")
 
     _log("Tuning post-processing on the out-of-fold predictions")
-    transform = tune_transform(out_of_fold, faults, folds, cfg["postprocess"])
-    post_scores = local_scores(transform(out_of_fold), faults, folds)
-    if np.mean(post_scores) < np.mean(fold_scores):  # rounding in the fast tuner; keep the identity
-        transform, post_scores = IDENTITY, fold_scores
+    post_processing = tune_post_processing(out_of_fold, faults, folds, cfg["postprocess"])
+    post_scores = local_scores(post_processing(out_of_fold), faults, folds)
     scores["mean_local_score"] = float(np.mean(post_scores))
     scores["fold_local_scores"] = post_scores
-    _log(f"Tuned post-processing: {transform.as_dict()}")
+    _log(f"Tuned post-processing: {post_processing.as_dict()}")
     _log(f"Mean local score (post-processed): {_score_summary(post_scores)}")
 
     _log("Final fit on the whole study area")
     train = _training_pixels(faults, study_area, cfg, sample_key=0)
     raw_probabilities = build_model(cfg["model"]).fit(features, faults, train).predict(features, study_area)
-    probabilities = transform(raw_probabilities)
+    probabilities = post_processing(raw_probabilities)
 
     _log("Writing submission")
     submission_path = write_submission(run_dir / "submission.tif", probabilities, grid)
@@ -148,7 +146,7 @@ def run_experiment(config: str | Path | dict) -> RunResult:
         "end_time": ended.isoformat(),
         "runtime_seconds": round(time.perf_counter() - t0, 3),
         "scores": scores,
-        "postprocess": transform.as_dict(),
+        "postprocess": post_processing.as_dict(),
         "postprocess_note": TUNING_NOTE,
     }
     (run_dir / "metadata.json").write_text(json.dumps(metadata, indent=2), encoding="utf-8")

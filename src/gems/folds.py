@@ -8,7 +8,7 @@ edge don't leak into training.
 import numpy as np
 from scipy import ndimage
 
-from gems.dti import DISTANCE_TOLERANCE_M, PIXEL_SIZE_M, score_dti
+from gems.dti import DISTANCE_TOLERANCE_M, PIXEL_SIZE_M, RegionScorer
 
 NO_FOLD = -1
 
@@ -66,7 +66,6 @@ def training_region(
     return (folds != NO_FOLD) & ~near
 
 
-def local_scores(probability: np.ndarray, faults: np.ndarray, folds: np.ndarray) -> list[float]:
+def local_scores(probability: np.ndarray, known_faults: np.ndarray, folds: np.ndarray) -> list[float]:
     """The DTI of each spatial fold, scored on that fold's region against its known faults."""
-    n_folds = int(folds.max()) + 1
-    return [score_dti(probability, faults, folds == k).dti for k in range(n_folds)]
+    return [score.dti for score in RegionScorer(known_faults, folds).score(probability)]
