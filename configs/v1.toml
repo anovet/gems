@@ -1,0 +1,20 @@
+# V1 steel thread. Paths are relative to the directory you run `gems` from (the repo root).
+# Run with: uv run gems run --config configs/v1.toml
+
+[run]
+name = "v1"
+iteration = "V1"
+
+[data]
+features = "data/gems-geodawn-numerical-features.tif"
+labels = "data/existing_faults.tif"
+# Feature bands by name (per-band `band_name` metadata). V1 uses all 19 raw bands.
+bands = [
+    "mag_anom", "rtp", "tmi_hg", "geod_2ndinv", "iso_grav_anom_slope", "tc",
+    "geod_shearrate", "geod_dilaterate", "tmi_vg", "deq_n100a15", "iso_grav_anom_vg",
+    "det_elev", "iso_grav_anom", "tmi", "depth_to_base_surf", "ieq_n100a15",
+    "cond_surf", "iso_grav_anom_hg", "det_elev_slope",
+]
+
+[output]
+runs_dir = "runs"
