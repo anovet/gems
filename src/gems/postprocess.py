@@ -1,14 +1,14 @@
 """Post-processing: map raw model probabilities to submitted values, tuned on the local score.
 
 The DTI makes false alarms cheap (alpha = 0.2) and misses expensive (beta = 0.8), so raw
-probabilities are rarely the best values to submit. The transform family is
+probabilities are rarely the best values to submit. The post-processing family is
 
     value = clip(scale * p ** power, 0, 1)   where p >= threshold, else 0
 
 and the identity (threshold 0, power 1, scale 1) is always a candidate, so tuning can never
 lower the local score it is tuned on. Tuning is a grid search over the out-of-fold predictions
-scored per spatial fold: mildly optimistic, since the same folds choose and score the transform
-(no nested cross-validation; accepted for V1).
+scored per spatial fold: mildly optimistic, since the same folds choose and score the
+post-processing (no nested cross-validation; accepted for V1).
 """
 
 from dataclasses import asdict, dataclass

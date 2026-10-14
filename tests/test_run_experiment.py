@@ -204,7 +204,7 @@ def test_post_processed_score_is_never_below_raw_even_with_a_poor_search_space(s
     assert meta["postprocess"] == {"threshold": 0.0, "power": 1.0, "scale": 1.0}
 
 
-def test_submission_carries_the_tuned_transform(synthetic):
+def test_submission_carries_the_tuned_post_processing(synthetic):
     config = _config_with_postprocess(synthetic, thresholds=[0.5], powers=[1.0], scales=[2.0])
 
     result = run_experiment(config)
