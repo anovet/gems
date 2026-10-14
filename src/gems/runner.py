@@ -99,8 +99,8 @@ def run_experiment(config: str | Path | dict) -> RunResult:
     out_of_fold = _out_of_fold_predictions(features, faults, folds, cfg)
     fold_scores = local_scores(out_of_fold, faults, folds)
     scores = {
-        "fold_local_scores_raw": fold_scores,
         "mean_local_score_raw": float(np.mean(fold_scores)),
+        "fold_local_scores_raw": fold_scores,
     }
     per_fold = ", ".join(f"{s:.4f}" for s in fold_scores)
     _log(f"Mean local score (raw): {scores['mean_local_score_raw']:.4f} (folds: {per_fold})")
