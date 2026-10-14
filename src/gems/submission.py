@@ -37,21 +37,21 @@ def validate_submission(path: Path, reference: Path, labels: Path) -> list[str]:
     problems: list[str] = []
 
     with rasterio.open(path) as src:
-        if src.crs != ref.crs:
-            problems.append(f"CRS is {src.crs}, expected {ref.crs}.")
-        res = (abs(src.transform.a), abs(src.transform.e))
-        if not np.allclose(res, ref.res):
-            problems.append(f"Resolution is {res}, expected {ref.res}.")
-        if (src.height, src.width) != ref.shape:
-            problems.append(f"Shape is {(src.height, src.width)} (rows, cols), expected {ref.shape}.")
-        if not np.allclose(tuple(src.bounds), ref.bounds):
-            problems.append(f"Bounds are {tuple(src.bounds)}, expected {ref.bounds}.")
+        sub = Grid(src.crs, src.transform, src.height, src.width)
+        if sub.crs != ref.crs:
+            problems.append(f"CRS is {sub.crs}, expected {ref.crs}.")
+        if not np.allclose(sub.res, ref.res):
+            problems.append(f"Resolution is {sub.res}, expected {ref.res}.")
+        if sub.shape != ref.shape:
+            problems.append(f"Shape is {sub.shape} (rows, cols), expected {ref.shape}.")
+        if not np.allclose(sub.bounds, ref.bounds):
+            problems.append(f"Bounds are {sub.bounds}, expected {ref.bounds}.")
         if src.count != 1:
             problems.append(f"Has {src.count} bands, expected exactly 1.")
         dtype = src.dtypes[0]
         if dtype != "float32":
             problems.append(f"Data type is {dtype}, expected float32.")
-        if problems and (src.height, src.width) != ref.shape:
+        if problems and sub.shape != ref.shape:
             return problems  # pixel checks are meaningless on the wrong shape
         values = src.read(1, masked=False).astype(np.float64)
         nodata = src.nodata
