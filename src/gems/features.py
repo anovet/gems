@@ -8,9 +8,9 @@ in, a (features, rows, cols) float32 stack with NaN for missing values out.
 import numpy as np
 
 
-def compute_features(bands: np.ndarray, band_names: list[str]) -> tuple[np.ndarray, list[str]]:
+def compute_features(bands: np.ndarray, band_names: list[str]) -> np.ndarray:
     """V1: the raw feature bands, missing values left as NaN."""
-    return bands, list(band_names)
+    return bands
 
 
 def pixel_rows(features: np.ndarray, mask: np.ndarray) -> np.ndarray:

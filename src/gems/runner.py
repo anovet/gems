@@ -143,11 +143,13 @@ def _run(cfg: dict[str, Any], run_dir: Path, metadata: dict[str, Any]) -> RunRes
         cfg["data"]["bands"] = names
         _write_config(run_dir, cfg)  # record the bands actually used
 
-    features, _ = compute_features(bands, names)
+    features = compute_features(bands, names)
     del bands
 
     folds = assign_spatial_folds(study_area, pixel_size=grid.res[0], **cfg["folds"])
-    out_of_fold = _out_of_fold_predictions(features, known_faults, folds, cfg)
+    out_of_fold = _out_of_fold_predictions(
+        features, known_faults, folds, model_params=cfg["model"], **cfg["sampling"]
+    )
     fold_scores = local_scores(out_of_fold, known_faults, folds)
     scores = {
         "mean_local_score_raw": float(np.mean(fold_scores)),
@@ -167,7 +169,7 @@ def _run(cfg: dict[str, Any], run_dir: Path, metadata: dict[str, Any]) -> RunRes
     _log(f"Mean local score (post-processed): {_score_summary(post_scores)}")
 
     _log("Final fit on the whole study area")
-    train = _training_pixels(known_faults, study_area, cfg, sample_key=0)
+    train = _training_pixels(known_faults, study_area, **cfg["sampling"], sample_key=0)
     raw_probabilities = build_model(cfg["model"]).fit(features, known_faults, train).predict(features, study_area)
     probabilities = post_processing(raw_probabilities)
 
@@ -196,31 +198,37 @@ def _write_metadata(run_dir: Path, metadata: dict[str, Any], t0: float) -> None:
 
 
 def _out_of_fold_predictions(
-    features: np.ndarray, known_faults: np.ndarray, folds: np.ndarray, cfg: dict[str, Any]
+    features: np.ndarray,
+    known_faults: np.ndarray,
+    folds: np.ndarray,
+    *,
+    model_params: dict[str, Any],
+    negative_ratio: float,
+    seed: int,
 ) -> np.ndarray:
     """Train one model per spatial fold and predict its held-out region."""
     out_of_fold = np.full(folds.shape, np.nan, dtype=np.float32)
-    n_folds = cfg["folds"]["n_folds"]
+    n_folds = int(folds.max()) + 1
     for k in range(n_folds):
         held_out = folds == k
-        train = _training_pixels(known_faults, training_region(folds, k), cfg, sample_key=k + 1)
+        train = _training_pixels(
+            known_faults, training_region(folds, k), negative_ratio=negative_ratio, seed=seed, sample_key=k + 1
+        )
         _log(
             f"Fold {k + 1}/{n_folds}: training on {int(train.sum()):,} pixels "
             f"({int((train & known_faults).sum()):,} known-fault), predicting {int(held_out.sum()):,}"
         )
-        model = build_model(cfg["model"]).fit(features, known_faults, train)
+        model = build_model(model_params).fit(features, known_faults, train)
         out_of_fold[held_out] = model.predict(features, held_out)[held_out]
     return out_of_fold
 
 
 def _training_pixels(
-    known_faults: np.ndarray, eligible: np.ndarray, cfg: dict[str, Any], sample_key: int
+    known_faults: np.ndarray, eligible: np.ndarray, *, negative_ratio: float, seed: int, sample_key: int
 ) -> np.ndarray:
     """All known faults in `eligible` plus seeded non-fault samples; one random stream per fit."""
-    rng = np.random.default_rng([cfg["sampling"]["seed"], sample_key])
-    return sample_training_pixels(
-        known_faults, eligible, negative_ratio=cfg["sampling"]["negative_ratio"], rng=rng
-    )
+    rng = np.random.default_rng([seed, sample_key])
+    return sample_training_pixels(known_faults, eligible, negative_ratio=negative_ratio, rng=rng)
 
 
 def _score_summary(fold_scores: list[float]) -> str:
