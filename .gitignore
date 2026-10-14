@@ -11,3 +11,9 @@ wheels/
 
 # Data
 data/
+
+# Run outputs (one folder per run, plus results table)
+runs/
+
+# Agent worktrees
+.claude/worktrees/

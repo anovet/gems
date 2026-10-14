@@ -1,0 +1,49 @@
+# V1 steel thread. Paths are relative to the directory you run `gems` from (the repo root).
+# Run with: uv run gems run --config configs/v1.toml
+
+[run]
+name = "v1"
+iteration = "V1"
+
+[data]
+features = "data/gems-geodawn-numerical-features.tif"
+labels = "data/existing_faults.tif"
+# Feature bands by name (per-band `band_name` metadata). V1 uses all 19 raw bands.
+bands = [
+    "mag_anom", "rtp", "tmi_hg", "geod_2ndinv", "iso_grav_anom_slope", "tc",
+    "geod_shearrate", "geod_dilaterate", "tmi_vg", "deq_n100a15", "iso_grav_anom_vg",
+    "det_elev", "iso_grav_anom", "tmi", "depth_to_base_surf", "ieq_n100a15",
+    "cond_surf", "iso_grav_anom_hg", "det_elev_slope",
+]
+
+[output]
+runs_dir = "runs"  # the shared results table is runs_dir/results.csv
+
+# Spatial folds (ADR 0001): square blocks dealt at random to folds, balanced by block count.
+[folds]
+block_size = 20000.0  # metres
+n_folds = 5
+seed = 0
+
+# Training pixels: every known-fault pixel, plus this many non-fault pixels per fault pixel.
+[sampling]
+negative_ratio = 10.0
+seed = 0
+
+# scikit-learn HistGradientBoostingClassifier keyword arguments.
+[model]
+learning_rate = 0.1
+max_iter = 200
+max_leaf_nodes = 31
+min_samples_leaf = 20
+l2_regularization = 0.0
+early_stopping = false
+random_state = 0
+
+# Post-processing: value = clip(scale * p ** power, 0, 1) where p >= threshold, else 0.
+# Grid search over every combination (plus the identity) for the best mean local score on the
+# out-of-fold predictions. Mildly optimistic: no nested cross-validation (accepted for V1).
+[postprocess]
+thresholds = [0.0, 0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5, 0.55, 0.6, 0.65, 0.7, 0.75, 0.8, 0.85, 0.9, 0.95]
+powers = [0.5, 1.0, 2.0]
+scales = [1.0, 1.5, 2.0, 3.0, 5.0]

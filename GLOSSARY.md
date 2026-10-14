@@ -81,6 +81,10 @@ The two disjoint chunks of the GeoDAWN region whose new faults score submissions
 The DTI we compute ourselves on held-out known faults, averaged across spatial folds; our primary measure of progress.
 _Avoid_: CV score, validation accuracy
 
+**Post-processing**:
+The tuned mapping from a model's raw fault probabilities to the values submitted, chosen to maximise the local score; local scores are reported both raw and post-processed.
+_Avoid_: Transform, calibration
+
 **Leaderboard score**:
 The DTI the challenge reports for a submission on the public test set.
 _Avoid_: Public score, test score
