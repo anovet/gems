@@ -107,7 +107,7 @@ def test_run_reports_per_fold_and_mean_local_scores(synthetic):
 
 def test_local_score_beats_an_all_zeros_prediction(synthetic):
     zeros = np.zeros(synthetic.study_area.shape, dtype=np.float32)
-    all_zeros = score_dti(zeros, synthetic.faults, synthetic.study_area).dti
+    all_zeros = score_dti(zeros, synthetic.known_faults, synthetic.study_area).dti
 
     result = run_experiment(synthetic.config)
 

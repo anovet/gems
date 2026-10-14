@@ -29,7 +29,7 @@ class SyntheticDataset:
     config: Path
     runs_dir: Path
     study_area: np.ndarray  # bool, True inside the study area
-    faults: np.ndarray  # bool, True on known-fault pixels
+    known_faults: np.ndarray  # bool, True on known-fault pixels
 
 
 def _study_area(rows: int, cols: int) -> np.ndarray:
@@ -41,11 +41,11 @@ def _study_area(rows: int, cols: int) -> np.ndarray:
 
 
 def _fault_traces(rows: int, cols: int) -> np.ndarray:
-    faults = np.zeros((rows, cols), dtype=bool)
-    faults[np.arange(5, 55), np.arange(10, 60)] = True  # diagonal
-    faults[30, 5:75] = True  # east-west
-    faults[8:52, 20] = True  # north-south
-    return faults
+    traces = np.zeros((rows, cols), dtype=bool)
+    traces[np.arange(5, 55), np.arange(10, 60)] = True  # diagonal
+    traces[30, 5:75] = True  # east-west
+    traces[8:52, 20] = True  # north-south
+    return traces
 
 
 def write_dataset(root: Path, seed: int = 0) -> SyntheticDataset:
@@ -53,10 +53,10 @@ def write_dataset(root: Path, seed: int = 0) -> SyntheticDataset:
     root.mkdir(parents=True, exist_ok=True)
     transform = from_origin(ORIGIN_X, ORIGIN_Y, PIXEL, PIXEL)
     study = _study_area(ROWS, COLS)
-    faults = _fault_traces(ROWS, COLS) & study
+    known_faults = _fault_traces(ROWS, COLS) & study
 
     bands = rng.normal(size=(len(BAND_NAMES), ROWS, COLS)).astype(np.float32)
-    bands[BAND_NAMES.index(FAULT_BAND)] += 3.0 * faults
+    bands[BAND_NAMES.index(FAULT_BAND)] += 3.0 * known_faults
     bands[:, ~study] = FEATURE_NODATA
     # A few study-area pixels missing one band, like the real data.
     holes = study & (rng.random((ROWS, COLS)) < 0.02)
@@ -74,7 +74,7 @@ def write_dataset(root: Path, seed: int = 0) -> SyntheticDataset:
 
     labels_arr = np.full((ROWS, COLS), LABEL_NODATA, dtype=np.int8)
     labels_arr[study] = 0
-    labels_arr[faults] = 1
+    labels_arr[known_faults] = 1
     labels = root / "labels.tif"
     with rasterio.open(
         labels, "w", driver="GTiff", width=COLS, height=ROWS, count=1,
@@ -109,7 +109,7 @@ max_iter = 30
 """,
         encoding="utf-8",
     )
-    return SyntheticDataset(root, features, labels, config, runs_dir, study, faults)
+    return SyntheticDataset(root, features, labels, config, runs_dir, study, known_faults)
 
 
 @pytest.fixture

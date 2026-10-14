@@ -64,12 +64,12 @@ def read_feature_bands(path: Path, names: list[str] | None = None) -> tuple[np.n
 def read_labels(path: Path) -> tuple[np.ndarray, np.ndarray]:
     """Read the known-fault labels.
 
-    Returns (faults, study_area): two bool grids. The study area is the label
-    raster's valid (non-nodata) pixels; faults are pixels labelled 1.
+    Returns (known_faults, study_area): two bool grids. The study area is the label
+    raster's valid (non-nodata) pixels; known faults are pixels labelled 1.
     """
     with rasterio.open(path) as src:
         labels = src.read(1)
         nodata = src.nodata
     study_area = labels != nodata if nodata is not None else np.ones(labels.shape, dtype=bool)
-    faults = (labels == 1) & study_area
-    return faults, study_area
+    known_faults = (labels == 1) & study_area
+    return known_faults, study_area
