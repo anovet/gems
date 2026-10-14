@@ -14,6 +14,7 @@ import numpy as np
 from gems.features import compute_features
 from gems.folds import assign_spatial_folds, local_scores, training_region
 from gems.model import build_model
+from gems.postprocess import IDENTITY, TUNING_NOTE, tune_transform
 from gems.preview import save_preview
 from gems.raster import read_feature_bands, read_grid, read_labels
 from gems.results import append_result
@@ -38,6 +39,12 @@ DEFAULTS: dict[str, Any] = {
         "l2_regularization": 0.0,
         "early_stopping": False,
         "random_state": 0,
+    },
+    # Post-processing search space: every combination is tried, plus the identity.
+    "postprocess": {
+        "thresholds": [round(0.05 * i, 2) for i in range(20)],  # 0.0, 0.05, ..., 0.95
+        "powers": [0.5, 1.0, 2.0],
+        "scales": [1.0, 1.5, 2.0, 3.0, 5.0],
     },
 }
 
@@ -103,13 +110,22 @@ def run_experiment(config: str | Path | dict) -> RunResult:
         "mean_local_score_raw": float(np.mean(fold_scores)),
         "fold_local_scores_raw": fold_scores,
     }
-    per_fold = ", ".join(f"{s:.4f}" for s in fold_scores)
-    _log(f"Mean local score (raw): {scores['mean_local_score_raw']:.4f} (folds: {per_fold})")
-    # Post-processing (#5) is tuned here, on `out_of_fold` scored per spatial fold.
+    _log(f"Mean local score (raw): {_score_summary(fold_scores)}")
+
+    _log("Tuning post-processing on the out-of-fold predictions")
+    transform = tune_transform(out_of_fold, faults, folds, cfg["postprocess"])
+    post_scores = local_scores(transform(out_of_fold), faults, folds)
+    if np.mean(post_scores) < np.mean(fold_scores):  # rounding in the fast tuner; keep the identity
+        transform, post_scores = IDENTITY, fold_scores
+    scores["mean_local_score"] = float(np.mean(post_scores))
+    scores["fold_local_scores"] = post_scores
+    _log(f"Tuned post-processing: {transform.as_dict()}")
+    _log(f"Mean local score (post-processed): {_score_summary(post_scores)}")
 
     _log("Final fit on the whole study area")
     train = _training_pixels(faults, study_area, cfg, sample_key=0)
-    probabilities = build_model(cfg["model"]).fit(features, faults, train).predict(features, study_area)
+    raw_probabilities = build_model(cfg["model"]).fit(features, faults, train).predict(features, study_area)
+    probabilities = transform(raw_probabilities)
 
     _log("Writing submission")
     submission_path = write_submission(run_dir / "submission.tif", probabilities, grid)
@@ -132,6 +148,8 @@ def run_experiment(config: str | Path | dict) -> RunResult:
         "end_time": ended.isoformat(),
         "runtime_seconds": round(time.perf_counter() - t0, 3),
         "scores": scores,
+        "postprocess": transform.as_dict(),
+        "postprocess_note": TUNING_NOTE,
     }
     (run_dir / "metadata.json").write_text(json.dumps(metadata, indent=2), encoding="utf-8")
     append_result(
@@ -176,6 +194,11 @@ def _training_pixels(
     return sample_training_pixels(
         faults, eligible, negative_ratio=cfg["sampling"]["negative_ratio"], rng=rng
     )
+
+
+def _score_summary(fold_scores: list[float]) -> str:
+    per_fold = ", ".join(f"{s:.4f}" for s in fold_scores)
+    return f"{np.mean(fold_scores):.4f} (folds: {per_fold})"
 
 
 def _log(message: str) -> None:

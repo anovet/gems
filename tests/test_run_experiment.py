@@ -135,3 +135,72 @@ def test_each_run_appends_one_row_to_the_results_table(synthetic):
     assert folds == pytest.approx(second.scores["fold_local_scores_raw"])
     assert row["leaderboard_score"] == ""
     assert rows[0]["run_dir"] == first.run_dir.name
+
+
+def _config_with_postprocess(synthetic, **search_space):
+    with open(synthetic.config, "rb") as f:
+        config = tomllib.load(f)
+    config["postprocess"] = search_space
+    return config
+
+
+def test_run_reports_raw_and_post_processed_local_scores_and_tuned_parameters(synthetic):
+    result = run_experiment(synthetic.config)
+
+    meta = json.loads((result.run_dir / "metadata.json").read_text(encoding="utf-8"))
+    scores = meta["scores"]
+    assert len(scores["fold_local_scores"]) == 5
+    assert scores["mean_local_score"] == pytest.approx(sum(scores["fold_local_scores"]) / 5)
+    assert set(meta["postprocess"]) == {"threshold", "power", "scale"}
+    assert "optimistic" in meta["postprocess_note"]
+    with open(synthetic.runs_dir / "results.csv", newline="", encoding="utf-8") as f:
+        row = next(csv.DictReader(f))
+    assert float(row["mean_local_score"]) == pytest.approx(scores["mean_local_score"])
+    assert float(row["mean_local_score_raw"]) == pytest.approx(scores["mean_local_score_raw"])
+
+
+def test_post_processing_improves_the_local_score_on_synthetic_data(synthetic):
+    result = run_experiment(synthetic.config)
+
+    assert result.scores["mean_local_score"] > result.scores["mean_local_score_raw"]
+
+
+def test_an_identity_only_search_space_leaves_the_local_score_unchanged(synthetic):
+    config = _config_with_postprocess(synthetic, thresholds=[0.0], powers=[1.0], scales=[1.0])
+
+    result = run_experiment(config)
+
+    assert result.scores["fold_local_scores"] == result.scores["fold_local_scores_raw"]
+
+
+def test_post_processed_score_is_never_below_raw_even_with_a_poor_search_space(synthetic):
+    config = _config_with_postprocess(synthetic, thresholds=[0.99], powers=[8.0], scales=[0.1])
+
+    result = run_experiment(config)
+
+    assert result.scores["mean_local_score"] >= result.scores["mean_local_score_raw"]
+    meta = json.loads((result.run_dir / "metadata.json").read_text(encoding="utf-8"))
+    assert meta["postprocess"] == {"threshold": 0.0, "power": 1.0, "scale": 1.0}
+
+
+def test_submission_carries_the_tuned_transform(synthetic):
+    config = _config_with_postprocess(synthetic, thresholds=[0.5], powers=[1.0], scales=[2.0])
+
+    result = run_experiment(config)
+
+    meta = json.loads((result.run_dir / "metadata.json").read_text(encoding="utf-8"))
+    assert meta["postprocess"] == {"threshold": 0.5, "power": 1.0, "scale": 2.0}
+    with rasterio.open(result.submission_path) as src:
+        inside = src.read(1)[synthetic.study_area]
+    # Below the threshold becomes 0; at or above it, 2p >= 1 is clipped to 1.
+    assert set(np.unique(inside).tolist()) == {0.0, 1.0}
+    assert validate_submission(result.submission_path, synthetic.features, synthetic.labels) == []
+
+
+def test_same_seed_gives_identical_tuned_post_processing(synthetic):
+    first = run_experiment(synthetic.config)
+    second = run_experiment(synthetic.config)
+
+    meta = [json.loads((r.run_dir / "metadata.json").read_text(encoding="utf-8")) for r in (first, second)]
+    assert meta[0]["postprocess"] == meta[1]["postprocess"]
+    assert meta[0]["scores"] == meta[1]["scores"]
