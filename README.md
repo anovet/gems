@@ -49,11 +49,11 @@ result.scores, result.run_dir, result.submission_path
 Everything under `runs/` is git-ignored.
 
 - **Run folder**, `runs/<YYYYMMDD-HHMMSS>_<name>/`, one per run, never overwritten:
-  - `config.toml`: the resolved config, with defaults filled in
-  - `metadata.json`: git commit and dirty flag, start and end time, runtime, per-fold and mean local scores (raw and post-processed), and the tuned post-processing parameters
+  - `config.toml`: the resolved config, with defaults filled in, written as the run starts
+  - `metadata.json`: status (`completed`, or `failed` with the error), git commit and dirty flag, start and end time, runtime, per-fold and mean local scores (raw and post-processed), and the tuned post-processing parameters; written even if the run fails
   - `submission.tif`: the submission to upload
-  - a preview image of the fault probability map with known faults overlaid and a zoomed inset
-- **Results CSV**, `runs/results.csv`: one row per run, with timestamp, run name, iteration, commit, dirty flag, mean local score (raw and post-processed), per-fold local scores, and a leaderboard-score column that starts empty.
+  - `preview.png`: the fault probability map with known faults overlaid and a zoomed inset
+- **Results CSV**, `runs/results.csv`: one row per completed run, with columns `timestamp`, `run_name`, `iteration`, `run_dir` (the run folder's name), `git_commit`, `git_dirty`, `mean_local_score_raw`, `fold_local_scores_raw`, `mean_local_score_postprocessed`, `fold_local_scores_postprocessed` (per-fold scores are `;`-separated) and `leaderboard_score`, which starts empty.
 
 ## Validating a GeoTIFF
 
@@ -69,8 +69,8 @@ It checks CRS, resolution, bounds, shape, band count, dtype, the value range [0,
 
 Uploads are manual, through the challenge website. After the leaderboard score appears:
 
-1. Open `runs/results.csv` and find the row for the run whose `submission.tif` you uploaded (match the timestamp and run name to the run folder).
-2. Type the score into that row's leaderboard-score column and save the file. Keep it as plain CSV.
+1. Open `runs/results.csv` and find the row whose `run_dir` is the name of the run folder holding the `submission.tif` you uploaded.
+2. Type the score into that row's `leaderboard_score` column and save the file. Keep it as plain CSV.
 3. Copy the score into the iteration record as well (see below), since `runs/` is not in git.
 
 ## Iterations, branches and tags
