@@ -14,7 +14,7 @@ import numpy as np
 from gems.features import compute_features
 from gems.folds import assign_spatial_folds, local_scores, training_region
 from gems.model import build_model
-from gems.postprocess import IDENTITY, TUNING_NOTE, tune_transform
+from gems.postprocess import TUNING_NOTE, tune_post_processing
 from gems.preview import save_preview
 from gems.raster import read_feature_bands, read_grid, read_labels
 from gems.results import append_result
@@ -84,74 +84,36 @@ def load_config(config: str | Path | dict) -> dict[str, Any]:
 
 
 def run_experiment(config: str | Path | dict) -> RunResult:
-    """Run one experiment end to end: load data, predict, write and validate a submission."""
+    """Run one experiment end to end: load data, predict, write and validate a submission.
+
+    The run folder gets the resolved config.toml first and metadata.json last, also when the
+    run fails (status "failed" and the error); the failure is then re-raised. Only completed
+    runs get a row in the results CSV.
+    """
     cfg = load_config(config)
     started = datetime.now().astimezone()
     t0 = time.perf_counter()
     run_dir = _new_run_dir(Path(cfg["output"]["runs_dir"]), cfg["run"]["name"], started)
     _log(f"Run folder: {run_dir}")
-
-    features_path, labels_path = Path(cfg["data"]["features"]), Path(cfg["data"]["labels"])
-    _log("Loading feature bands and known-fault labels")
-    grid = read_grid(features_path)
-    bands, names = read_feature_bands(features_path, cfg["data"]["bands"])
-    faults, study_area = read_labels(labels_path)
-    if study_area.shape != grid.shape:
-        raise ValueError(f"Label grid {study_area.shape} does not match feature grid {grid.shape}")
-    cfg["data"]["bands"] = names
-
-    features, _ = compute_features(bands, names)
-    del bands
-
-    folds = assign_spatial_folds(study_area, pixel_size=grid.res[0], **cfg["folds"])
-    out_of_fold = _out_of_fold_predictions(features, faults, folds, cfg)
-    fold_scores = local_scores(out_of_fold, faults, folds)
-    scores = {
-        "mean_local_score_raw": float(np.mean(fold_scores)),
-        "fold_local_scores_raw": fold_scores,
-    }
-    _log(f"Mean local score (raw): {_score_summary(fold_scores)}")
-
-    _log("Tuning post-processing on the out-of-fold predictions")
-    transform = tune_transform(out_of_fold, faults, folds, cfg["postprocess"])
-    post_scores = local_scores(transform(out_of_fold), faults, folds)
-    if np.mean(post_scores) < np.mean(fold_scores):  # rounding in the fast tuner; keep the identity
-        transform, post_scores = IDENTITY, fold_scores
-    scores["mean_local_score"] = float(np.mean(post_scores))
-    scores["fold_local_scores"] = post_scores
-    _log(f"Tuned post-processing: {transform.as_dict()}")
-    _log(f"Mean local score (post-processed): {_score_summary(post_scores)}")
-
-    _log("Final fit on the whole study area")
-    train = _training_pixels(faults, study_area, cfg, sample_key=0)
-    raw_probabilities = build_model(cfg["model"]).fit(features, faults, train).predict(features, study_area)
-    probabilities = transform(raw_probabilities)
-
-    _log("Writing submission")
-    submission_path = write_submission(run_dir / "submission.tif", probabilities, grid)
-    problems = validate_submission(submission_path, features_path, labels_path)
-    if problems:
-        raise InvalidSubmissionError(submission_path, problems)
-
-    _log("Saving preview map")
-    save_preview(run_dir / "preview.png", probabilities, faults, study_area, grid, title=run_dir.name)
-
-    ended = datetime.now().astimezone()
+    _write_config(run_dir, cfg)
     commit, dirty = _git_state()
-    (run_dir / "config.toml").write_text(_to_toml(cfg), encoding="utf-8")
-    metadata = {
+    metadata: dict[str, Any] = {
         "run_name": cfg["run"]["name"],
         "iteration": cfg["run"]["iteration"],
+        "status": "running",
         "git_commit": commit,
         "git_dirty": dirty,
         "start_time": started.isoformat(),
-        "end_time": ended.isoformat(),
-        "runtime_seconds": round(time.perf_counter() - t0, 3),
-        "scores": scores,
-        "postprocess": transform.as_dict(),
-        "postprocess_note": TUNING_NOTE,
     }
-    (run_dir / "metadata.json").write_text(json.dumps(metadata, indent=2), encoding="utf-8")
+    try:
+        result = _run(cfg, run_dir, metadata)
+    except BaseException as e:
+        metadata["status"] = "failed"
+        metadata["error"] = f"{type(e).__name__}: {e}"
+        _write_metadata(run_dir, metadata, t0)
+        raise
+    metadata["status"] = "completed"
+    _write_metadata(run_dir, metadata, t0)
     append_result(
         Path(cfg["output"]["runs_dir"]) / RESULTS_CSV,
         {
@@ -161,39 +123,112 @@ def run_experiment(config: str | Path | dict) -> RunResult:
             "run_dir": run_dir.name,
             "git_commit": commit,
             "git_dirty": dirty,
-            **scores,
+            **result.scores,
         },
     )
-    _log(f"Done in {metadata['runtime_seconds']} s: {submission_path}")
+    _log(f"Done in {metadata['runtime_seconds']} s: {result.submission_path}")
+    return result
+
+
+def _run(cfg: dict[str, Any], run_dir: Path, metadata: dict[str, Any]) -> RunResult:
+    """The experiment itself; adds scores and post-processing parameters to `metadata`."""
+    features_path, labels_path = Path(cfg["data"]["features"]), Path(cfg["data"]["labels"])
+    _log("Loading feature bands and known-fault labels")
+    grid = read_grid(features_path)
+    bands, names = read_feature_bands(features_path, cfg["data"]["bands"])
+    known_faults, study_area = read_labels(labels_path)
+    if study_area.shape != grid.shape:
+        raise ValueError(f"Label grid {study_area.shape} does not match feature grid {grid.shape}")
+    if cfg["data"]["bands"] != names:
+        cfg["data"]["bands"] = names
+        _write_config(run_dir, cfg)  # record the bands actually used
+
+    features = compute_features(bands, names)
+    del bands
+
+    folds = assign_spatial_folds(study_area, pixel_size=grid.res[0], **cfg["folds"])
+    out_of_fold = _out_of_fold_predictions(
+        features, known_faults, folds, model_params=cfg["model"], **cfg["sampling"]
+    )
+    fold_scores = local_scores(out_of_fold, known_faults, folds)
+    scores = {
+        "mean_local_score_raw": float(np.mean(fold_scores)),
+        "fold_local_scores_raw": fold_scores,
+    }
+    metadata["scores"] = scores
+    _log(f"Mean local score (raw): {_score_summary(fold_scores)}")
+
+    _log("Tuning post-processing on the out-of-fold predictions")
+    post_processing = tune_post_processing(out_of_fold, known_faults, folds, cfg["postprocess"])
+    post_scores = local_scores(post_processing(out_of_fold), known_faults, folds)
+    scores["mean_local_score_postprocessed"] = float(np.mean(post_scores))
+    scores["fold_local_scores_postprocessed"] = post_scores
+    metadata["postprocess"] = post_processing.as_dict()
+    metadata["postprocess_note"] = TUNING_NOTE
+    _log(f"Tuned post-processing: {post_processing.as_dict()}")
+    _log(f"Mean local score (post-processed): {_score_summary(post_scores)}")
+
+    _log("Final fit on the whole study area")
+    train = _training_pixels(known_faults, study_area, **cfg["sampling"], sample_key=0)
+    raw_probabilities = build_model(cfg["model"]).fit(features, known_faults, train).predict(features, study_area)
+    probabilities = post_processing(raw_probabilities)
+
+    _log("Writing submission")
+    submission_path = write_submission(run_dir / "submission.tif", probabilities, grid)
+    problems = validate_submission(submission_path, features_path, labels_path)
+    if problems:
+        raise InvalidSubmissionError(submission_path, problems)
+
+    _log("Saving preview map")
+    save_preview(run_dir / "preview.png", probabilities, known_faults, study_area, grid, title=run_dir.name)
     return RunResult(run_dir, submission_path, scores, out_of_fold=out_of_fold, folds=folds)
 
 
+def _write_config(run_dir: Path, cfg: dict[str, Any]) -> None:
+    (run_dir / "config.toml").write_text(_to_toml(cfg), encoding="utf-8")
+
+
+def _write_metadata(run_dir: Path, metadata: dict[str, Any], t0: float) -> None:
+    """Write metadata.json with the end time and runtime filled in."""
+    metadata.update(
+        end_time=datetime.now().astimezone().isoformat(),
+        runtime_seconds=round(time.perf_counter() - t0, 3),
+    )
+    (run_dir / "metadata.json").write_text(json.dumps(metadata, indent=2), encoding="utf-8")
+
+
 def _out_of_fold_predictions(
-    features: np.ndarray, faults: np.ndarray, folds: np.ndarray, cfg: dict[str, Any]
+    features: np.ndarray,
+    known_faults: np.ndarray,
+    folds: np.ndarray,
+    *,
+    model_params: dict[str, Any],
+    negative_ratio: float,
+    seed: int,
 ) -> np.ndarray:
     """Train one model per spatial fold and predict its held-out region."""
     out_of_fold = np.full(folds.shape, np.nan, dtype=np.float32)
-    n_folds = cfg["folds"]["n_folds"]
+    n_folds = int(folds.max()) + 1
     for k in range(n_folds):
         held_out = folds == k
-        train = _training_pixels(faults, training_region(folds, k), cfg, sample_key=k + 1)
+        train = _training_pixels(
+            known_faults, training_region(folds, k), negative_ratio=negative_ratio, seed=seed, sample_key=k + 1
+        )
         _log(
             f"Fold {k + 1}/{n_folds}: training on {int(train.sum()):,} pixels "
-            f"({int((train & faults).sum()):,} known-fault), predicting {int(held_out.sum()):,}"
+            f"({int((train & known_faults).sum()):,} known-fault), predicting {int(held_out.sum()):,}"
         )
-        model = build_model(cfg["model"]).fit(features, faults, train)
+        model = build_model(model_params).fit(features, known_faults, train)
         out_of_fold[held_out] = model.predict(features, held_out)[held_out]
     return out_of_fold
 
 
 def _training_pixels(
-    faults: np.ndarray, eligible: np.ndarray, cfg: dict[str, Any], sample_key: int
+    known_faults: np.ndarray, eligible: np.ndarray, *, negative_ratio: float, seed: int, sample_key: int
 ) -> np.ndarray:
     """All known faults in `eligible` plus seeded non-fault samples; one random stream per fit."""
-    rng = np.random.default_rng([cfg["sampling"]["seed"], sample_key])
-    return sample_training_pixels(
-        faults, eligible, negative_ratio=cfg["sampling"]["negative_ratio"], rng=rng
-    )
+    rng = np.random.default_rng([seed, sample_key])
+    return sample_training_pixels(known_faults, eligible, negative_ratio=negative_ratio, rng=rng)
 
 
 def _score_summary(fold_scores: list[float]) -> str:

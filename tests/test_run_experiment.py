@@ -54,6 +54,25 @@ def test_run_folder_records_config_metadata_and_submission(synthetic):
     assert isinstance(meta["git_dirty"], bool)
     assert datetime.fromisoformat(meta["start_time"]) <= datetime.fromisoformat(meta["end_time"])
     assert meta["runtime_seconds"] >= 0
+    assert meta["status"] == "completed"
+
+
+def test_a_failed_run_still_records_its_config_and_the_error(synthetic):
+    with open(synthetic.config, "rb") as f:
+        config = tomllib.load(f)
+    config["data"]["bands"] = ["mag_anom", "no_such_band"]
+
+    with pytest.raises(ValueError, match="no_such_band"):
+        run_experiment(config)
+
+    (run_dir,) = synthetic.runs_dir.iterdir()
+    with open(run_dir / "config.toml", "rb") as f:
+        assert tomllib.load(f)["data"]["bands"] == ["mag_anom", "no_such_band"]
+    meta = json.loads((run_dir / "metadata.json").read_text(encoding="utf-8"))
+    assert meta["status"] == "failed"
+    assert "no_such_band" in meta["error"]
+    assert meta["runtime_seconds"] >= 0
+    assert not (synthetic.runs_dir / "results.csv").exists()
 
 
 def test_repeated_runs_get_separate_folders(synthetic):
@@ -88,7 +107,7 @@ def test_run_reports_per_fold_and_mean_local_scores(synthetic):
 
 def test_local_score_beats_an_all_zeros_prediction(synthetic):
     zeros = np.zeros(synthetic.study_area.shape, dtype=np.float32)
-    all_zeros = score_dti(zeros, synthetic.faults, synthetic.study_area).dti
+    all_zeros = score_dti(zeros, synthetic.known_faults, synthetic.study_area).dti
 
     result = run_experiment(synthetic.config)
 
@@ -149,20 +168,22 @@ def test_run_reports_raw_and_post_processed_local_scores_and_tuned_parameters(sy
 
     meta = json.loads((result.run_dir / "metadata.json").read_text(encoding="utf-8"))
     scores = meta["scores"]
-    assert len(scores["fold_local_scores"]) == 5
-    assert scores["mean_local_score"] == pytest.approx(sum(scores["fold_local_scores"]) / 5)
+    assert len(scores["fold_local_scores_postprocessed"]) == 5
+    assert scores["mean_local_score_postprocessed"] == pytest.approx(
+        sum(scores["fold_local_scores_postprocessed"]) / 5
+    )
     assert set(meta["postprocess"]) == {"threshold", "power", "scale"}
     assert "optimistic" in meta["postprocess_note"]
     with open(synthetic.runs_dir / "results.csv", newline="", encoding="utf-8") as f:
         row = next(csv.DictReader(f))
-    assert float(row["mean_local_score"]) == pytest.approx(scores["mean_local_score"])
+    assert float(row["mean_local_score_postprocessed"]) == pytest.approx(scores["mean_local_score_postprocessed"])
     assert float(row["mean_local_score_raw"]) == pytest.approx(scores["mean_local_score_raw"])
 
 
 def test_post_processing_improves_the_local_score_on_synthetic_data(synthetic):
     result = run_experiment(synthetic.config)
 
-    assert result.scores["mean_local_score"] > result.scores["mean_local_score_raw"]
+    assert result.scores["mean_local_score_postprocessed"] > result.scores["mean_local_score_raw"]
 
 
 def test_an_identity_only_search_space_leaves_the_local_score_unchanged(synthetic):
@@ -170,7 +191,7 @@ def test_an_identity_only_search_space_leaves_the_local_score_unchanged(syntheti
 
     result = run_experiment(config)
 
-    assert result.scores["fold_local_scores"] == result.scores["fold_local_scores_raw"]
+    assert result.scores["fold_local_scores_postprocessed"] == result.scores["fold_local_scores_raw"]
 
 
 def test_post_processed_score_is_never_below_raw_even_with_a_poor_search_space(synthetic):
@@ -178,12 +199,12 @@ def test_post_processed_score_is_never_below_raw_even_with_a_poor_search_space(s
 
     result = run_experiment(config)
 
-    assert result.scores["mean_local_score"] >= result.scores["mean_local_score_raw"]
+    assert result.scores["mean_local_score_postprocessed"] >= result.scores["mean_local_score_raw"]
     meta = json.loads((result.run_dir / "metadata.json").read_text(encoding="utf-8"))
     assert meta["postprocess"] == {"threshold": 0.0, "power": 1.0, "scale": 1.0}
 
 
-def test_submission_carries_the_tuned_transform(synthetic):
+def test_submission_carries_the_tuned_post_processing(synthetic):
     config = _config_with_postprocess(synthetic, thresholds=[0.5], powers=[1.0], scales=[2.0])
 
     result = run_experiment(config)

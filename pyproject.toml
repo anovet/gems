@@ -10,6 +10,7 @@ dependencies = [
     "pandas>=3.0.6",
     "rasterio>=1.5.2",
     "scikit-learn>=1.9.1",
+    "scipy>=1.18.1",
 ]
 
 [project.scripts]
@@ -23,6 +24,7 @@ build-backend = "uv_build"
 dev = [
     "ipykernel>=7.4.0",
     "nbconvert>=7.17.2",
+    "pillow>=12.3.0",
     "pytest>=9.1.1",
 ]
 

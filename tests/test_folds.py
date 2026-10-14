@@ -1,14 +1,19 @@
-"""Spatial folds: the leakage guarantee, which the run's outputs can't show directly."""
+"""Spatial folds: the leakage guarantee, which the run's outputs can't show directly.
+
+A deliberate exception to spec #1's two-seam rule (runner and DTI scorer only): ticket #4's
+criterion "no training pixel within 300 m of the held-out fold" is not observable through the
+runner's outputs, so it is checked here on `gems.folds` directly.
+"""
 
 import numpy as np
 from scipy import ndimage
 
-from conftest import COLS, ROWS, _study_area
+from conftest import study_area_mask
 from gems.folds import assign_spatial_folds, training_region
 
 
 def test_no_training_pixel_lies_within_300_m_of_the_held_out_fold():
-    study = _study_area(ROWS, COLS)
+    study = study_area_mask()
     folds = assign_spatial_folds(study, block_size=2000.0, n_folds=5, seed=3)
 
     for k in range(5):
@@ -18,7 +23,7 @@ def test_no_training_pixel_lies_within_300_m_of_the_held_out_fold():
         assert train.any()
         assert not (train & ~study).any()
         assert metres_to_fold[train].min() > 300.0
-        # Only the buffer is dropped: pixels beyond it are still used.
+        # Only pixels within the distance tolerance are dropped: those beyond it are still used.
         assert np.array_equal(train, study & (metres_to_fold > 300.0))
 
 

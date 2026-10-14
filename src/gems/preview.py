@@ -41,14 +41,14 @@ class Window:
 def save_preview(
     path: str | Path,
     probabilities: np.ndarray,
-    faults: np.ndarray,
+    known_faults: np.ndarray,
     study_area: np.ndarray,
     grid: Grid,
     title: str | None = None,
 ) -> Path:
     """Write a PNG of the fault probability map with known faults overlaid and a zoomed inset."""
     path = Path(path)
-    fig = preview_figure(probabilities, faults, study_area, grid, title=title)
+    fig = preview_figure(probabilities, known_faults, study_area, grid, title=title)
     FigureCanvasAgg(fig)
     fig.savefig(path, dpi=100)
     return path
@@ -56,25 +56,25 @@ def save_preview(
 
 def preview_figure(
     probabilities: np.ndarray,
-    faults: np.ndarray,
+    known_faults: np.ndarray,
     study_area: np.ndarray,
     grid: Grid,
     title: str | None = None,
     inset: Window | None = None,
 ) -> Figure:
     """Study-area overview of the fault probability map, known faults on top, plus a zoomed inset."""
-    inset = inset or choose_inset(faults, study_area)
+    inset = inset or choose_inset(known_faults, study_area)
     fig = Figure(figsize=(16, 8), layout="constrained")
     overview, zoom = fig.subplots(1, 2, width_ratios=[1.15, 1])
 
     image = _draw_probabilities(overview, probabilities, study_area, grid, _bbox(study_area))
-    _draw_faults(overview, faults, grid, _bbox(study_area), pool=True)
+    _draw_faults(overview, known_faults, grid, _bbox(study_area), pool=True)
     x0, y0, x1, y1 = _extent_xy(grid, inset)
     overview.add_patch(Rectangle((x0, y0), x1 - x0, y1 - y0, fill=False, edgecolor="white", lw=1.5))
     overview.set_title("Fault probability map, known faults overlaid")
 
     _draw_probabilities(zoom, probabilities, study_area, grid, inset)
-    _draw_faults(zoom, faults, grid, inset, pool=False, alpha=0.45)
+    _draw_faults(zoom, known_faults, grid, inset, pool=False, alpha=0.45)
     zoom.set_title(f"Zoomed inset ({inset.height * grid.res[1] / 1000:g} km, 100 m pixels)")
 
     fig.colorbar(image, ax=[overview, zoom], shrink=0.8, label="Fault probability")
@@ -82,15 +82,15 @@ def preview_figure(
     return fig
 
 
-def known_faults_figure(faults: np.ndarray, study_area: np.ndarray, grid: Grid) -> Figure:
+def known_faults_figure(known_faults: np.ndarray, study_area: np.ndarray, grid: Grid) -> Figure:
     """The known faults over the study area."""
     fig = Figure(figsize=(9, 9), layout="constrained")
     ax = fig.subplots()
     window = _bbox(study_area)
     _draw_mask(ax, study_area, grid, window, colour="#d9d9d9")
-    _draw_faults(ax, faults, grid, window, pool=True, colour="black")
+    _draw_faults(ax, known_faults, grid, window, pool=True, colour="black")
     ax.ticklabel_format(style="plain", useOffset=False)
-    ax.set_title(f"Known faults over the study area ({faults.sum():,} fault pixels)")
+    ax.set_title(f"Known faults over the study area ({known_faults.sum():,} fault pixels)")
     return fig
 
 
@@ -127,11 +127,11 @@ def read_fault_probability_map(path: str | Path) -> tuple[np.ndarray, Grid]:
     return probabilities, read_grid(Path(path))
 
 
-def choose_inset(faults: np.ndarray, study_area: np.ndarray, size: int = INSET_PIXELS) -> Window:
+def choose_inset(known_faults: np.ndarray, study_area: np.ndarray, size: int = INSET_PIXELS) -> Window:
     """The square window with the most known-fault pixels (searched on a half-window stride)."""
-    rows, cols = faults.shape
+    rows, cols = known_faults.shape
     h, w = min(size, rows), min(size, cols)
-    counts = np.pad(faults.astype(np.int64).cumsum(0).cumsum(1), ((1, 0), (1, 0)))
+    counts = np.pad(known_faults.astype(np.int64).cumsum(0).cumsum(1), ((1, 0), (1, 0)))
     step = max(1, size // 2)
     starts_r = sorted({*range(0, rows - h + 1, step), rows - h})
     starts_c = sorted({*range(0, cols - w + 1, step), cols - w})
@@ -160,9 +160,9 @@ def _draw_probabilities(ax, probabilities, study_area, grid, window):
     return image
 
 
-def _draw_faults(ax, faults, grid, window, pool, colour=FAULT_COLOUR, alpha=1.0):
+def _draw_faults(ax, known_faults, grid, window, pool, colour=FAULT_COLOUR, alpha=1.0):
     """Overlay known-fault pixels. In overviews, max-pool so thin fault traces survive downsampling."""
-    cut = faults[window.slices]
+    cut = known_faults[window.slices]
     factor = max(1, -(-max(cut.shape) // OVERVIEW_PIXELS)) if pool else 1
     if factor > 1:
         h, w = cut.shape

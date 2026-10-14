@@ -341,12 +341,14 @@ dependencies = [
     { name = "pandas" },
     { name = "rasterio" },
     { name = "scikit-learn" },
+    { name = "scipy" },
 ]
 
 [package.dev-dependencies]
 dev = [
     { name = "ipykernel" },
     { name = "nbconvert" },
+    { name = "pillow" },
     { name = "pytest" },
 ]
 
@@ -357,12 +359,14 @@ requires-dist = [
     { name = "pandas", specifier = ">=3.0.6" },
     { name = "rasterio", specifier = ">=1.5.2" },
     { name = "scikit-learn", specifier = ">=1.9.1" },
+    { name = "scipy", specifier = ">=1.18.1" },
 ]
 
 [package.metadata.requires-dev]
 dev = [
     { name = "ipykernel", specifier = ">=7.4.0" },
     { name = "nbconvert", specifier = ">=7.17.2" },
+    { name = "pillow", specifier = ">=12.3.0" },
     { name = "pytest", specifier = ">=9.1.1" },
 ]
 
