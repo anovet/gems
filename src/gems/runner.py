@@ -11,6 +11,7 @@ from typing import Any
 
 import numpy as np
 
+from gems.preview import save_preview
 from gems.raster import read_feature_bands, read_grid, read_labels
 from gems.submission import validate_submission, write_submission
 
@@ -82,6 +83,9 @@ def run_experiment(config: str | Path | dict) -> RunResult:
     problems = validate_submission(submission_path, features_path, labels_path)
     if problems:
         raise InvalidSubmissionError(submission_path, problems)
+
+    _log("Saving preview map")
+    save_preview(run_dir / "preview.png", probabilities, faults, study_area, grid, title=run_dir.name)
 
     ended = datetime.now().astimezone()
     commit, dirty = _git_state()
