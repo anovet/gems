@@ -15,4 +15,4 @@ Default vocabulary: `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-
 Single-context: one `GLOSSARY.md` and `docs/adr/` at the repo root. See `docs/agents/domain.md`.
 General background on the project, copied from an external source: `docs/agents/background.md`
 
-When discussing improvements to the model or pipeline, read the ADRs marked as deferred or "revisit" (currently 0003 and 0004) and raise those known limitations as candidates.
+When discussing improvements to the model or pipeline, read the "Known limitations / improvement ideas" section of `docs/roadmap.md` and raise those limitations as candidates.
