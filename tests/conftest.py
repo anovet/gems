@@ -32,7 +32,7 @@ class SyntheticDataset:
     known_faults: np.ndarray  # bool, True on known-fault pixels
 
 
-def _study_area(rows: int, cols: int) -> np.ndarray:
+def study_area_mask(rows: int = ROWS, cols: int = COLS) -> np.ndarray:
     """Irregular blob with a nodata border on every side."""
     r, c = np.mgrid[0:rows, 0:cols]
     ellipse = ((r - rows / 2) / (rows * 0.42)) ** 2 + ((c - cols / 2) / (cols * 0.45)) ** 2 <= 1
@@ -52,7 +52,7 @@ def write_dataset(root: Path, seed: int = 0) -> SyntheticDataset:
     rng = np.random.default_rng(seed)
     root.mkdir(parents=True, exist_ok=True)
     transform = from_origin(ORIGIN_X, ORIGIN_Y, PIXEL, PIXEL)
-    study = _study_area(ROWS, COLS)
+    study = study_area_mask(ROWS, COLS)
     known_faults = _fault_traces(ROWS, COLS) & study
 
     bands = rng.normal(size=(len(BAND_NAMES), ROWS, COLS)).astype(np.float32)
