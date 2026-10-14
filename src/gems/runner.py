@@ -115,8 +115,8 @@ def run_experiment(config: str | Path | dict) -> RunResult:
     _log("Tuning post-processing on the out-of-fold predictions")
     post_processing = tune_post_processing(out_of_fold, faults, folds, cfg["postprocess"])
     post_scores = local_scores(post_processing(out_of_fold), faults, folds)
-    scores["mean_local_score"] = float(np.mean(post_scores))
-    scores["fold_local_scores"] = post_scores
+    scores["mean_local_score_postprocessed"] = float(np.mean(post_scores))
+    scores["fold_local_scores_postprocessed"] = post_scores
     _log(f"Tuned post-processing: {post_processing.as_dict()}")
     _log(f"Mean local score (post-processed): {_score_summary(post_scores)}")
 

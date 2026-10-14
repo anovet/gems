@@ -149,20 +149,22 @@ def test_run_reports_raw_and_post_processed_local_scores_and_tuned_parameters(sy
 
     meta = json.loads((result.run_dir / "metadata.json").read_text(encoding="utf-8"))
     scores = meta["scores"]
-    assert len(scores["fold_local_scores"]) == 5
-    assert scores["mean_local_score"] == pytest.approx(sum(scores["fold_local_scores"]) / 5)
+    assert len(scores["fold_local_scores_postprocessed"]) == 5
+    assert scores["mean_local_score_postprocessed"] == pytest.approx(
+        sum(scores["fold_local_scores_postprocessed"]) / 5
+    )
     assert set(meta["postprocess"]) == {"threshold", "power", "scale"}
     assert "optimistic" in meta["postprocess_note"]
     with open(synthetic.runs_dir / "results.csv", newline="", encoding="utf-8") as f:
         row = next(csv.DictReader(f))
-    assert float(row["mean_local_score"]) == pytest.approx(scores["mean_local_score"])
+    assert float(row["mean_local_score_postprocessed"]) == pytest.approx(scores["mean_local_score_postprocessed"])
     assert float(row["mean_local_score_raw"]) == pytest.approx(scores["mean_local_score_raw"])
 
 
 def test_post_processing_improves_the_local_score_on_synthetic_data(synthetic):
     result = run_experiment(synthetic.config)
 
-    assert result.scores["mean_local_score"] > result.scores["mean_local_score_raw"]
+    assert result.scores["mean_local_score_postprocessed"] > result.scores["mean_local_score_raw"]
 
 
 def test_an_identity_only_search_space_leaves_the_local_score_unchanged(synthetic):
@@ -170,7 +172,7 @@ def test_an_identity_only_search_space_leaves_the_local_score_unchanged(syntheti
 
     result = run_experiment(config)
 
-    assert result.scores["fold_local_scores"] == result.scores["fold_local_scores_raw"]
+    assert result.scores["fold_local_scores_postprocessed"] == result.scores["fold_local_scores_raw"]
 
 
 def test_post_processed_score_is_never_below_raw_even_with_a_poor_search_space(synthetic):
@@ -178,7 +180,7 @@ def test_post_processed_score_is_never_below_raw_even_with_a_poor_search_space(s
 
     result = run_experiment(config)
 
-    assert result.scores["mean_local_score"] >= result.scores["mean_local_score_raw"]
+    assert result.scores["mean_local_score_postprocessed"] >= result.scores["mean_local_score_raw"]
     meta = json.loads((result.run_dir / "metadata.json").read_text(encoding="utf-8"))
     assert meta["postprocess"] == {"threshold": 0.0, "power": 1.0, "scale": 1.0}
 
