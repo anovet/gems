@@ -17,4 +17,25 @@ bands = [
 ]
 
 [output]
-runs_dir = "runs"
+runs_dir = "runs"  # the shared results table is runs_dir/results.csv
+
+# Spatial folds (ADR 0001): square blocks dealt at random to folds, balanced by block count.
+[folds]
+block_size = 20000.0  # metres
+n_folds = 5
+seed = 0
+
+# Training pixels: every known-fault pixel, plus this many non-fault pixels per fault pixel.
+[sampling]
+negative_ratio = 10.0
+seed = 0
+
+# scikit-learn HistGradientBoostingClassifier keyword arguments.
+[model]
+learning_rate = 0.1
+max_iter = 200
+max_leaf_nodes = 31
+min_samples_leaf = 20
+l2_regularization = 0.0
+early_stopping = false
+random_state = 0

@@ -98,6 +98,14 @@ bands = {bands_toml}
 
 [output]
 runs_dir = '{runs_dir.as_posix()}'
+
+[folds]
+block_size = 2000.0  # metres; the 6 km x 8 km synthetic grid needs blocks far below 20 km
+n_folds = 5
+seed = 0
+
+[model]
+max_iter = 30
 """,
         encoding="utf-8",
     )
