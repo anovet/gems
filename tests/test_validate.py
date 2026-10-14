@@ -74,6 +74,6 @@ def test_cli_validate_reports_problems_and_exit_code(synthetic, tmp_path, capsys
 def test_cli_run_completes_on_synthetic_config(synthetic, capsys):
     assert main(["run", "--config", str(synthetic.config)]) == 0
 
-    run_dirs = list(synthetic.runs_dir.iterdir())
+    run_dirs = [p for p in synthetic.runs_dir.iterdir() if p.is_dir()]
     assert len(run_dirs) == 1
     assert (run_dirs[0] / "submission.tif").exists()
