@@ -8,7 +8,7 @@ Each iteration is one planned, measurable improvement judged by its local score 
 
 | Iteration | What it adds | Record |
 |---|---|---|
-| **V1**, steel thread | Per-pixel gradient-boosted trees on the 19 raw feature bands; spatial folds; our own DTI scorer; post-processing tuned on the local score; a validated submission. | _not yet written_ |
+| **V1**, steel thread | Per-pixel gradient-boosted trees on the 19 raw feature bands; spatial folds; our own DTI scorer; post-processing tuned on the local score; a validated submission. | [v1.md](iterations/v1.md) |
 | **V2** | Multi-scale neighbourhood and lineament features: local gradients, edge and lineament filters, focal statistics over about 300 m, 1 km and 3 km. | |
 | **V3** | A U-Net like the [reference solution](https://github.com/drivendataorg/gems-prize-reference-solution), trained on the local GPU and compared against V2. | |
 | **V4** | Features derived from the 1 m DEM: slope, curvature, hillshade and scarp-detection filters, aggregated to 100 m. | |
