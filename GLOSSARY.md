@@ -78,11 +78,22 @@ The two disjoint chunks of the GeoDAWN region whose new faults score submissions
 ## Our process
 
 **Local score**:
-The DTI we compute ourselves on held-out known faults, averaged across spatial folds; our primary measure of progress.
+The DTI we compute ourselves on held-out known faults, averaged across spatial folds; kept for comparison with V1, no longer our primary measure.
 _Avoid_: CV score, validation accuracy
 
+**Withheld fault**:
+A known fault withheld from training and scored as if it were a new fault.
+_Avoid_: Hidden fault, pseudo-new fault, held-out fault
+
+**Withheld-fault score**:
+The DTI on withheld faults, with the other known faults excluded, averaged across groups of withheld faults; our primary measure of progress, built to imitate the leaderboard.
+_Avoid_: Local score (for this), holdout score
+
+**Constant-map baseline**:
+The score of a fault probability map of 1 over the whole study area; the no-skill score every other score is compared against.
+
 **Post-processing**:
-The tuned mapping from a model's raw fault probabilities to the values submitted, chosen to maximise the local score; local scores are reported both raw and post-processed.
+The tuned mapping from a model's raw fault probabilities to the values submitted, chosen to maximise the withheld-fault score; scores are reported both raw and post-processed.
 _Avoid_: Transform, calibration
 
 **Leaderboard score**:

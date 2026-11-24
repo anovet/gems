@@ -1,4 +1,4 @@
-"""Post-processing: map raw model probabilities to submitted values, tuned on the local score.
+"""Post-processing: map raw model probabilities to submitted values, tuned on the withheld-fault score.
 
 The DTI makes false alarms cheap (alpha = 0.2) and misses expensive (beta = 0.8), so raw
 probabilities are rarely the best values to submit. The post-processing family is
@@ -6,9 +6,9 @@ probabilities are rarely the best values to submit. The post-processing family i
     value = clip(scale * p ** power, 0, 1)   where p >= threshold, else 0
 
 and the identity (threshold 0, power 1, scale 1) is always a candidate, so tuning can never
-lower the local score it is tuned on. Tuning is a grid search over the out-of-fold predictions
-scored per spatial fold: mildly optimistic, since the same folds choose and score the
-post-processing (no nested cross-validation; accepted for V1).
+lower the score it is tuned on. Tuning is a grid search over a set of scored maps (ADR 0006:
+each withheld group's map, scored on its withheld faults). It is mildly optimistic, since the
+same maps choose and score the post-processing (no nested cross-validation).
 """
 
 from dataclasses import asdict, dataclass
@@ -20,8 +20,8 @@ import numpy as np
 from gems.dti import RegionScorer
 
 TUNING_NOTE = (
-    "Post-processing was tuned by grid search on the same out-of-fold predictions it is scored "
-    "on (no nested cross-validation), so the post-processed local score is mildly optimistic."
+    "Post-processing was tuned by grid search on the same withheld-fault maps it is scored on "
+    "(no nested cross-validation), so the post-processed withheld-fault score is mildly optimistic."
 )
 
 
@@ -50,28 +50,34 @@ IDENTITY = PostProcessing()
 
 
 def tune_post_processing(
-    out_of_fold: np.ndarray, known_faults: np.ndarray, folds: np.ndarray, search_space: dict[str, Any]
+    scored_maps: list[tuple[RegionScorer, np.ndarray]], search_space: dict[str, Any]
 ) -> PostProcessing:
-    """The post-processing from `search_space` (plus the identity) with the best mean local score.
+    """The post-processing from `search_space` (plus the identity) with the best mean DTI.
 
-    `search_space` has lists `thresholds`, `powers` and `scales`; every combination is tried.
-    Ties go to the identity, then to the earliest combination. Candidates are scored with the
-    same `RegionScorer` as `gems.folds.local_scores`, so the chosen one's local score is exactly
-    the one tuning saw, and never below the identity's (the raw local score).
+    `scored_maps` pairs each fault probability map with the scorer that scores it; the mean is
+    taken over every region of every scorer. `search_space` has lists `thresholds`, `powers`
+    and `scales`; every combination is tried. Ties go to the identity, then to the earliest
+    combination. Scoring a candidate the same way afterwards gives exactly the score tuning
+    saw, and never less than the identity's (the raw score).
     """
-    scorer = RegionScorer(known_faults, folds)
-    p = scorer.pixel_values(out_of_fold)
+    pixels = [(scorer, scorer.pixel_values(probability)) for scorer, probability in scored_maps]
 
-    def mean_local_score(candidate: PostProcessing, at: np.ndarray) -> float:
-        """`at`: the pixels at or above the candidate's threshold; all others become 0."""
-        return float(np.mean([s.dti for s in scorer.score_pixels(candidate(p[at]), at=at)]))
+    def at_or_above(threshold: float) -> list[np.ndarray]:
+        """Per map, the pixels at or above `threshold`; all others become 0."""
+        return [np.flatnonzero(p >= threshold) for _, p in pixels]
 
-    best, best_score = IDENTITY, mean_local_score(IDENTITY, np.flatnonzero(p >= IDENTITY.threshold))
+    def mean_score(candidate: PostProcessing, ats: list[np.ndarray]) -> float:
+        dti = []
+        for (scorer, p), at in zip(pixels, ats):
+            dti += [s.dti for s in scorer.score_pixels(candidate(p[at]), at=at)]
+        return float(np.mean(dti))
+
+    best, best_score = IDENTITY, mean_score(IDENTITY, at_or_above(IDENTITY.threshold))
     for threshold in search_space["thresholds"]:
-        at = np.flatnonzero(p >= threshold)
+        ats = at_or_above(threshold)
         for power, scale in product(search_space["powers"], search_space["scales"]):
             candidate = PostProcessing(float(threshold), float(power), float(scale))
-            score = mean_local_score(candidate, at)
+            score = mean_score(candidate, ats)
             if score > best_score:
                 best, best_score = candidate, score
     return best

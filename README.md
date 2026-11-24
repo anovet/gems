@@ -35,7 +35,7 @@ uv run gems run --config configs/v1.toml
 
 Run it from the repo root: paths in the config (`[data]` rasters, `[output] runs_dir`) are relative to the current directory. To try a variation, copy the config, edit it (feature bands, spatial folds, sampling, model, post-processing, run name and iteration) and run the copy. Save configs as UTF-8 without a byte-order mark; Windows PowerShell 5.1's `Set-Content -Encoding utf8` adds one and the TOML parser rejects it.
 
-The run prints progress messages, scores the out-of-fold predictions on the spatial folds, tunes the post-processing, retrains on all known faults, writes the submission and validates it. It exits with an error if the submission is invalid.
+The run prints progress messages, scores the out-of-fold predictions on the spatial folds, scores one map per group of withheld faults, tunes the post-processing on those, retrains on all known faults, writes the submission and validates it. It exits with an error if the submission is invalid.
 
 The same run from a notebook, through the same code path:
 
@@ -52,10 +52,10 @@ Everything under `runs/` is git-ignored.
 
 - **Run folder**, `runs/<YYYYMMDD-HHMMSS>_<name>/`, one per run, never overwritten:
   - `config.toml`: the resolved config, with defaults filled in, written as the run starts
-  - `metadata.json`: status (`completed`, or `failed` with the error), git commit and dirty flag, start and end time, runtime, per-fold and mean local scores (raw and post-processed), and the tuned post-processing parameters; written even if the run fails
+  - `metadata.json`: status (`completed`, or `failed` with the error), git commit and dirty flag, start and end time, runtime, per-fold and mean local scores and per-group and mean withheld-fault scores (raw and post-processed), the constant-map baseline, and the tuned post-processing parameters; written even if the run fails
   - `submission.tif`: the submission to upload
   - `preview.png`: the fault probability map with known faults overlaid and a zoomed inset
-- **Results CSV**, `runs/results.csv`: one row per completed run, with columns `timestamp`, `run_name`, `iteration`, `run_dir` (the run folder's name), `git_commit`, `git_dirty`, `mean_local_score_raw`, `fold_local_scores_raw`, `mean_local_score_postprocessed`, `fold_local_scores_postprocessed` (per-fold scores are `;`-separated) and `leaderboard_score`, which starts empty.
+- **Results CSV**, `runs/results.csv`: one row per completed run, with columns `timestamp`, `run_name`, `iteration`, `run_dir` (the run folder's name), `git_commit`, `git_dirty`, `mean_local_score_raw`, `fold_local_scores_raw`, `mean_withheld_score_raw`, `group_withheld_scores_raw`, `mean_withheld_score_constant` (the constant-map baseline), `mean_withheld_score_postprocessed`, `group_withheld_scores_postprocessed`, `mean_local_score_postprocessed`, `fold_local_scores_postprocessed` (per-fold and per-group scores are `;`-separated) and `leaderboard_score`, which starts empty. The withheld-fault score is the primary signal ([ADR 0006](docs/adr/0006-withheld-fault-score-is-the-primary-quality-signal.md)); the local score is kept for comparison with V1.
 
 ## Validating a GeoTIFF
 
@@ -84,4 +84,4 @@ Each iteration (V1, V2, …) is planned in [`docs/roadmap.md`](docs/roadmap.md) 
 3. Write its iteration record in `docs/iterations/vN.md`, starting from [`docs/iterations/TEMPLATE.md`](docs/iterations/TEMPLATE.md), and link it from the roadmap.
 4. Tag the commit that produced the iteration's chosen submission by hand: `git tag v1 <commit>` (then `v2`, …). The commit hash is in the run's `metadata.json` and the results CSV.
 
-The final submission is chosen by the rule in [ADR 0005](docs/adr/0005-final-submission-selection-rule.md): best local score, unless its leaderboard score is clearly worse than the runner-up's.
+The final submission is chosen by the rule in [ADR 0005](docs/adr/0005-final-submission-selection-rule.md), as amended by ADR 0006: best withheld-fault score, unless its leaderboard score is clearly worse than the runner-up's.
