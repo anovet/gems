@@ -20,6 +20,13 @@ from gems.raster import read_feature_bands, read_grid, read_labels
 from gems.results import append_result
 from gems.sampling import sample_training_pixels
 from gems.submission import validate_submission, write_submission
+from gems.withheld import (
+    assign_withheld_groups,
+    constant_map_scores,
+    given_faults,
+    withheld_fault_scores,
+    withheld_scorers,
+)
 
 DEFAULTS: dict[str, Any] = {
     "run": {"name": "run", "iteration": "V1"},
@@ -30,6 +37,8 @@ DEFAULTS: dict[str, Any] = {
     },
     "output": {"runs_dir": "runs"},
     "folds": {"block_size": 20_000.0, "n_folds": 5, "seed": 0},  # block_size in metres
+    # Withheld faults (ADR 0006): fault traces dealt into groups in cluster blocks (metres).
+    "withheld": {"cluster_size": 10_000.0, "n_groups": 5, "seed": 0},
     "sampling": {"negative_ratio": 10.0, "seed": 0},  # non-fault pixels per known-fault pixel
     "model": {  # HistGradientBoostingClassifier keyword arguments
         "learning_rate": 0.1,
@@ -50,6 +59,7 @@ DEFAULTS: dict[str, Any] = {
 
 
 RESULTS_CSV = "results.csv"  # the shared results table, inside runs_dir
+WITHHELD_SAMPLE_KEYS = 1000  # sampling streams of the withheld-group fits start here
 
 
 @dataclass
@@ -59,6 +69,7 @@ class RunResult:
     scores: dict[str, Any] = field(default_factory=dict)
     out_of_fold: np.ndarray | None = None  # raw out-of-fold fault probabilities, NaN outside study area
     folds: np.ndarray | None = None  # spatial fold of each pixel, -1 outside the study area
+    withheld_groups: np.ndarray | None = None  # withheld group of each known-fault pixel, -1 elsewhere
 
 
 class InvalidSubmissionError(RuntimeError):
@@ -151,21 +162,39 @@ def _run(cfg: dict[str, Any], run_dir: Path, metadata: dict[str, Any]) -> RunRes
         features, known_faults, folds, model_params=cfg["model"], **cfg["sampling"]
     )
     fold_scores = local_scores(out_of_fold, known_faults, folds)
-    scores = {
+    scores: dict[str, Any] = {
         "mean_local_score_raw": float(np.mean(fold_scores)),
         "fold_local_scores_raw": fold_scores,
     }
     metadata["scores"] = scores
     _log(f"Mean local score (raw): {_score_summary(fold_scores)}")
 
-    _log("Tuning post-processing on the out-of-fold predictions")
-    post_processing = tune_post_processing(out_of_fold, known_faults, folds, cfg["postprocess"])
-    post_scores = local_scores(post_processing(out_of_fold), known_faults, folds)
-    scores["mean_local_score_postprocessed"] = float(np.mean(post_scores))
-    scores["fold_local_scores_postprocessed"] = post_scores
+    groups = assign_withheld_groups(known_faults, pixel_size=grid.res[0], **cfg["withheld"])
+    withheld_maps = _withheld_predictions(
+        features, known_faults, study_area, groups, model_params=cfg["model"], **cfg["sampling"]
+    )
+    scorers = withheld_scorers(known_faults, study_area, groups)
+    group_scores = withheld_fault_scores(withheld_maps, scorers)
+    constant_scores = constant_map_scores(study_area, scorers)
+    scores["mean_withheld_score_raw"] = float(np.mean(group_scores))
+    scores["group_withheld_scores_raw"] = group_scores
+    scores["mean_withheld_score_constant"] = float(np.mean(constant_scores))
+    _log(f"Mean withheld-fault score (raw): {_score_summary(group_scores, "groups")}")
+    _log(f"Mean withheld-fault score of a constant map of 1: {_score_summary(constant_scores, "groups")}")
+
+    _log("Tuning post-processing on the withheld-fault maps")
+    post_processing = tune_post_processing(list(zip(scorers, withheld_maps)), cfg["postprocess"])
     metadata["postprocess"] = post_processing.as_dict()
     metadata["postprocess_note"] = TUNING_NOTE
     _log(f"Tuned post-processing: {post_processing.as_dict()}")
+    post_group_scores = withheld_fault_scores([post_processing(m) for m in withheld_maps], scorers)
+    scores["mean_withheld_score_postprocessed"] = float(np.mean(post_group_scores))
+    scores["group_withheld_scores_postprocessed"] = post_group_scores
+    _log(f"Mean withheld-fault score (post-processed): {_score_summary(post_group_scores, "groups")}")
+    del withheld_maps
+    post_scores = local_scores(post_processing(out_of_fold), known_faults, folds)
+    scores["mean_local_score_postprocessed"] = float(np.mean(post_scores))
+    scores["fold_local_scores_postprocessed"] = post_scores
     _log(f"Mean local score (post-processed): {_score_summary(post_scores)}")
 
     _log("Final fit on the whole study area")
@@ -181,7 +210,9 @@ def _run(cfg: dict[str, Any], run_dir: Path, metadata: dict[str, Any]) -> RunRes
 
     _log("Saving preview map")
     save_preview(run_dir / "preview.png", probabilities, known_faults, study_area, grid, title=run_dir.name)
-    return RunResult(run_dir, submission_path, scores, out_of_fold=out_of_fold, folds=folds)
+    return RunResult(
+        run_dir, submission_path, scores, out_of_fold=out_of_fold, folds=folds, withheld_groups=groups
+    )
 
 
 def _write_config(run_dir: Path, cfg: dict[str, Any]) -> None:
@@ -223,6 +254,36 @@ def _out_of_fold_predictions(
     return out_of_fold
 
 
+def _withheld_predictions(
+    features: np.ndarray,
+    known_faults: np.ndarray,
+    study_area: np.ndarray,
+    groups: np.ndarray,
+    *,
+    model_params: dict[str, Any],
+    negative_ratio: float,
+    seed: int,
+) -> list[np.ndarray]:
+    """One fault probability map per withheld group, from a model that never saw that group.
+
+    The withheld faults are labelled as non-fault, as new faults are in our labels, so they can
+    be sampled as non-fault training pixels.
+    """
+    maps = []
+    n_groups = int(groups.max()) + 1
+    for k in range(n_groups):
+        given = given_faults(known_faults, groups, k)
+        train = _training_pixels(
+            given, study_area, negative_ratio=negative_ratio, seed=seed, sample_key=WITHHELD_SAMPLE_KEYS + k
+        )
+        _log(
+            f"Withheld group {k + 1}/{n_groups}: withholding {int((groups == k).sum()):,} known-fault pixels, "
+            f"training on {int(train.sum()):,} pixels ({int(given[train].sum()):,} known-fault)"
+        )
+        maps.append(build_model(model_params).fit(features, given, train).predict(features, study_area))
+    return maps
+
+
 def _training_pixels(
     known_faults: np.ndarray, eligible: np.ndarray, *, negative_ratio: float, seed: int, sample_key: int
 ) -> np.ndarray:
@@ -231,9 +292,9 @@ def _training_pixels(
     return sample_training_pixels(known_faults, eligible, negative_ratio=negative_ratio, rng=rng)
 
 
-def _score_summary(fold_scores: list[float]) -> str:
-    per_fold = ", ".join(f"{s:.4f}" for s in fold_scores)
-    return f"{np.mean(fold_scores):.4f} (folds: {per_fold})"
+def _score_summary(scores: list[float], label: str = "folds") -> str:
+    each = ", ".join(f"{s:.4f}" for s in scores)
+    return f"{np.mean(scores):.4f} ({label}: {each})"
 
 
 def _log(message: str) -> None:

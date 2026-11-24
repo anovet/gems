@@ -1,3 +1,7 @@
+---
+status: superseded by ADR 0006
+---
+
 # Spatial folds, not the leaderboard, are the primary quality signal
 
 We judge every change by its **local score**: the DTI on held-out known faults, averaged over 5 **spatial folds** of roughly 20 km blocks. A random pixel split would put adjacent pixels of the same fault trace on both sides of the split and grossly overstate quality. The leaderboard allows only 3 submissions a week and covers only the public test chunk, so it serves as a cross-check, not the signal we optimise against.

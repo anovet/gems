@@ -180,10 +180,10 @@ def test_run_reports_raw_and_post_processed_local_scores_and_tuned_parameters(sy
     assert float(row["mean_local_score_raw"]) == pytest.approx(scores["mean_local_score_raw"])
 
 
-def test_post_processing_improves_the_local_score_on_synthetic_data(synthetic):
+def test_post_processing_improves_the_withheld_fault_score_on_synthetic_data(synthetic):
     result = run_experiment(synthetic.config)
 
-    assert result.scores["mean_local_score_postprocessed"] > result.scores["mean_local_score_raw"]
+    assert result.scores["mean_withheld_score_postprocessed"] > result.scores["mean_withheld_score_raw"]
 
 
 def test_an_identity_only_search_space_leaves_the_local_score_unchanged(synthetic):
@@ -192,14 +192,15 @@ def test_an_identity_only_search_space_leaves_the_local_score_unchanged(syntheti
     result = run_experiment(config)
 
     assert result.scores["fold_local_scores_postprocessed"] == result.scores["fold_local_scores_raw"]
+    assert result.scores["group_withheld_scores_postprocessed"] == result.scores["group_withheld_scores_raw"]
 
 
-def test_post_processed_score_is_never_below_raw_even_with_a_poor_search_space(synthetic):
+def test_post_processed_withheld_fault_score_is_never_below_raw_even_with_a_poor_search_space(synthetic):
     config = _config_with_postprocess(synthetic, thresholds=[0.99], powers=[8.0], scales=[0.1])
 
     result = run_experiment(config)
 
-    assert result.scores["mean_local_score_postprocessed"] >= result.scores["mean_local_score_raw"]
+    assert result.scores["mean_withheld_score_postprocessed"] >= result.scores["mean_withheld_score_raw"]
     meta = json.loads((result.run_dir / "metadata.json").read_text(encoding="utf-8"))
     assert meta["postprocess"] == {"threshold": 0.0, "power": 1.0, "scale": 1.0}
 
@@ -225,3 +226,36 @@ def test_same_seed_gives_identical_tuned_post_processing(synthetic):
     meta = [json.loads((r.run_dir / "metadata.json").read_text(encoding="utf-8")) for r in (first, second)]
     assert meta[0]["postprocess"] == meta[1]["postprocess"]
     assert meta[0]["scores"] == meta[1]["scores"]
+
+
+def test_run_reports_withheld_fault_scores_and_the_constant_map_baseline(synthetic):
+    result = run_experiment(synthetic.config)
+
+    scores = result.scores
+    for kind in ("raw", "postprocessed"):
+        groups = scores[f"group_withheld_scores_{kind}"]
+        assert len(groups) == 3  # n_groups in the synthetic config
+        assert all(0.0 <= s <= 1.0 for s in groups)
+        assert scores[f"mean_withheld_score_{kind}"] == pytest.approx(sum(groups) / 3)
+    assert 0.0 < scores["mean_withheld_score_constant"] < 1.0
+    meta = json.loads((result.run_dir / "metadata.json").read_text(encoding="utf-8"))
+    assert meta["scores"] == scores
+    with open(synthetic.runs_dir / "results.csv", newline="", encoding="utf-8") as f:
+        row = next(csv.DictReader(f))
+    for column in ("mean_withheld_score_raw", "mean_withheld_score_postprocessed", "mean_withheld_score_constant"):
+        assert float(row[column]) == pytest.approx(scores[column])
+    assert list(row)[-1] == "leaderboard_score"
+
+
+def test_withheld_fault_score_beats_a_constant_map_on_synthetic_data(synthetic):
+    result = run_experiment(synthetic.config)
+
+    assert result.scores["mean_withheld_score_raw"] > result.scores["mean_withheld_score_constant"]
+
+
+def test_every_known_fault_pixel_is_withheld_in_exactly_one_group(synthetic):
+    result = run_experiment(synthetic.config)
+
+    groups = result.withheld_groups
+    assert set(np.unique(groups[synthetic.known_faults]).tolist()) == {0, 1, 2}
+    assert np.all(groups[~synthetic.known_faults] == -1)

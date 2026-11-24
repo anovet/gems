@@ -41,10 +41,17 @@ def study_area_mask(rows: int = ROWS, cols: int = COLS) -> np.ndarray:
 
 
 def _fault_traces(rows: int, cols: int) -> np.ndarray:
+    """Three crossing lines (one fault trace) and six short, separate fault traces."""
     traces = np.zeros((rows, cols), dtype=bool)
     traces[np.arange(5, 55), np.arange(10, 60)] = True  # diagonal
     traces[30, 5:75] = True  # east-west
     traces[8:52, 20] = True  # north-south
+    traces[18:25, 12] = True
+    traces[22, 30:37] = True
+    traces[38, 55:66] = True
+    traces[40:47, 62] = True
+    traces[40:49, 40] = True
+    traces[50, 30:39] = True
     return traces
 
 
@@ -102,6 +109,11 @@ runs_dir = '{runs_dir.as_posix()}'
 [folds]
 block_size = 2000.0  # metres; the 6 km x 8 km synthetic grid needs blocks far below 20 km
 n_folds = 5
+seed = 0
+
+[withheld]
+cluster_size = 1000.0  # metres; puts each synthetic fault trace in its own cluster block
+n_groups = 3
 seed = 0
 
 [model]
