@@ -11,7 +11,7 @@ from typing import Any
 
 import numpy as np
 
-from gems.features import compute_features
+from gems.features import DEFAULT_FEATURES, FeatureStack, compute_features
 from gems.folds import assign_spatial_folds, local_scores, training_region
 from gems.model import build_model
 from gems.postprocess import TUNING_NOTE, tune_post_processing
@@ -36,6 +36,8 @@ DEFAULTS: dict[str, Any] = {
         "bands": None,  # None = every band in the features raster
     },
     "output": {"runs_dir": "runs"},
+    # Feature kinds and their scales in metres (see gems.features); the default is V1's raw bands.
+    "features": dict(DEFAULT_FEATURES),
     "folds": {"block_size": 20_000.0, "n_folds": 5, "seed": 0},  # block_size in metres
     # Withheld faults (ADR 0006): fault traces dealt into groups in cluster blocks (metres).
     "withheld": {"cluster_size": 10_000.0, "n_groups": 5, "seed": 0},
@@ -154,8 +156,12 @@ def _run(cfg: dict[str, Any], run_dir: Path, metadata: dict[str, Any]) -> RunRes
         cfg["data"]["bands"] = names
         _write_config(run_dir, cfg)  # record the bands actually used
 
-    features = compute_features(bands, names)
+    _log("Computing features")
+    features = compute_features(bands, names, study_area, pixel_size=grid.res[0], settings=cfg["features"])
     del bands
+    metadata["n_features"] = features.n_features
+    metadata["feature_names"] = features.names
+    _log(f"{features.n_features} features, {features.values.nbytes / 1e9:.2f} GB")
 
     folds = assign_spatial_folds(study_area, pixel_size=grid.res[0], **cfg["folds"])
     out_of_fold = _out_of_fold_predictions(
@@ -229,7 +235,7 @@ def _write_metadata(run_dir: Path, metadata: dict[str, Any], t0: float) -> None:
 
 
 def _out_of_fold_predictions(
-    features: np.ndarray,
+    features: FeatureStack,
     known_faults: np.ndarray,
     folds: np.ndarray,
     *,
@@ -255,7 +261,7 @@ def _out_of_fold_predictions(
 
 
 def _withheld_predictions(
-    features: np.ndarray,
+    features: FeatureStack,
     known_faults: np.ndarray,
     study_area: np.ndarray,
     groups: np.ndarray,
