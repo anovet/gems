@@ -259,3 +259,18 @@ def test_every_known_fault_pixel_is_withheld_in_exactly_one_group(synthetic):
     groups = result.withheld_groups
     assert set(np.unique(groups[synthetic.known_faults]).tolist()) == {0, 1, 2}
     assert np.all(groups[~synthetic.known_faults] == -1)
+
+
+def test_neighbourhood_features_run_end_to_end_and_are_recorded(synthetic):
+    with open(synthetic.config, "rb") as f:
+        config = tomllib.load(f)
+    config["features"] = {"anomaly_scales": [300.0, 1000.0], "coherence_scales": [1000.0]}
+
+    result = run_experiment(config)
+
+    assert validate_submission(result.submission_path, synthetic.features, synthetic.labels) == []
+    meta = json.loads((result.run_dir / "metadata.json").read_text(encoding="utf-8"))
+    assert meta["n_features"] == 3 * 4
+    assert "mag_anom:coherence@1000" in meta["feature_names"]
+    with open(result.run_dir / "config.toml", "rb") as f:
+        assert tomllib.load(f)["features"]["anomaly_scales"] == [300.0, 1000.0]
